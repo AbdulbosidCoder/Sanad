@@ -1,0 +1,10 @@
+{
+  "name": "sanad-ci-scripts",
+  "private": true,
+  "type": "module",
+  "description": "Helper scripts used by CI to validate documentation",
+  "dependencies": {
+    "jsdom": "25.0.1",
+    "mermaid": "11.4.1"
+  }
+}
