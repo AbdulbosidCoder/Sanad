@@ -1,0 +1,29 @@
+# Development: hot reload, ports open for debugging, local mail catcher.
+services:
+  api:
+    build: {target: dev}
+    volumes: ["../../backend:/app"]
+    ports: ["8000:8000"]
+    networks: [app, data, public]
+  worker:
+    build: {target: dev}
+    volumes: ["../../backend:/app"]
+  beat:
+    build: {target: dev}
+    volumes: ["../../backend:/app"]
+  migrate:
+    build: {target: dev}
+    volumes: ["../../backend:/app"]
+  postgres:
+    ports: ["5432:5432"]
+    networks: [data, public]
+  redis:
+    ports: ["6379:6379"]
+    networks: [data, public]
+  minio:
+    ports: ["9000:9000", "9001:9001"]
+    networks: [data, public]
+  mailpit:
+    image: axllent/mailpit:v1.21
+    ports: ["8025:8025"]
+    networks: [app, public]

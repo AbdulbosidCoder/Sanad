@@ -1,0 +1,10 @@
+[importlinter]
+root_package = app
+
+[importlinter:contract:core-is-independent]
+name = Core must not depend on business modules
+type = forbidden
+source_modules =
+    app.core
+forbidden_modules =
+    app.modules
