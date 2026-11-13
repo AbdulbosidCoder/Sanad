@@ -1,0 +1,31 @@
+# Production: built images only, restarts, resource limits, no debug ports.
+x-prod-env: &prod-env
+  APP_ENV: prod
+  FAKE_PAYMENTS_ENABLED: "false"
+
+services:
+  api:
+    restart: unless-stopped
+    build: {target: runtime}
+    environment: *prod-env
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "4", "--proxy-headers"]
+    deploy: {resources: {limits: {cpus: "2", memory: 1g}}}
+  worker:
+    restart: unless-stopped
+    build: {target: runtime}
+    environment: *prod-env
+    deploy: {resources: {limits: {cpus: "1", memory: 1g}}}
+  beat:
+    restart: unless-stopped
+    build: {target: runtime}
+    environment: *prod-env
+  migrate:
+    build: {target: runtime}
+    environment: *prod-env
+  postgres: {restart: unless-stopped}
+  redis: {restart: unless-stopped}
+  minio: {restart: unless-stopped}
+  proxy: {restart: unless-stopped}
+  web: {restart: unless-stopped}
+  seller: {restart: unless-stopped}
+  admin: {restart: unless-stopped}
