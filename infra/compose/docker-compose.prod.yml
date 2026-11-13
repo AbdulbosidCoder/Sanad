@@ -26,3 +26,6 @@ services:
   redis: {restart: unless-stopped}
   minio: {restart: unless-stopped}
   proxy: {restart: unless-stopped}
+  web: {restart: unless-stopped}
+  seller: {restart: unless-stopped}
+  admin: {restart: unless-stopped}

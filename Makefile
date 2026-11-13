@@ -2,7 +2,7 @@
 COMPOSE_DEV  = docker compose --env-file .env -f infra/compose/docker-compose.yml -f infra/compose/docker-compose.dev.yml
 COMPOSE_PROD = docker compose --env-file .env -f infra/compose/docker-compose.yml -f infra/compose/docker-compose.prod.yml
 
-.PHONY: help env up down ps logs migrate test lint shell prod-config
+.PHONY: help env up down ps logs migrate test lint shell prod-config fe-dev fe-check
 
 help:          ## Show this help
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -36,3 +36,9 @@ shell:         ## Open a shell in the API container
 
 prod-config:   ## Validate the production compose config
 	$(COMPOSE_PROD) config --quiet
+
+fe-dev:        ## Run the three frontend apps locally with hot reload
+	cd frontend && pnpm install && pnpm dev
+
+fe-check:      ## Lint, type-check, test and build the frontend
+	cd frontend && pnpm lint && pnpm typecheck && pnpm test && pnpm build
