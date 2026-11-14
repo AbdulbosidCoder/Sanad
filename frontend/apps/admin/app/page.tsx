@@ -1,5 +1,5 @@
 import { translator } from "@sanad/i18n";
-import { Logo } from "@sanad/ui";
+import { Logo, ThemeToggle } from "@sanad/ui";
 
 import { getLocale } from "./locale";
 import { SystemOverview } from "./system-overview";
@@ -11,7 +11,10 @@ export default function AdminHome() {
     <main className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6">
       <header className="flex flex-wrap items-center justify-between gap-4">
         <Logo name={t("brand.name")} />
-        <span className="text-sm font-semibold text-ink-muted">{t("admin.title")}</span>
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-semibold text-ink-muted">{t("admin.title")}</span>
+          <ThemeToggle locale={locale} />
+        </div>
       </header>
       <h1 className="font-display text-2xl font-extrabold">{t("admin.ops.title")}</h1>
       <SystemOverview locale={locale} />

@@ -30,5 +30,6 @@ pnpm lint && pnpm typecheck && pnpm test && pnpm build
 ## Правила
 
 - Любой текст интерфейса — ключ в `packages/i18n/src/locales/*.json` во всех трёх языках (тест проверяет, что ключи совпадают).
-- Цвета, шрифты и радиусы — только из `packages/ui` (Tailwind-классы `bg-primary`, `text-ink-muted`, `forest-*`…), без «магических» hex в приложениях.
+- Цвета — только семантические классы из `packages/ui` (`bg-surface`, `text-ink`, `bg-primary`, `text-ink-muted`, `bg-hero`, `bg-nav`…), без hex и без `forest-*` в интерфейсе. Тогда экран сам работает в дневной и ночной теме.
+- Темы: дневная, ночная и «как в системе». Значения — в `packages/ui/src/tokens.ts` (`themes.light`, `themes.dark`); переключатель — `ThemeToggle`, выбор хранится в браузере. Тест `themes.test.ts` проверяет контраст текста (WCAG AA, 4.5:1) в обеих темах.
 - Ошибки API показываются через `ErrorNotice`: пользователь видит код, модуль и ID запроса и может скопировать их одной кнопкой.

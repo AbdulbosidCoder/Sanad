@@ -33,5 +33,9 @@
   "error.copy": "Copy",
   "error.copied": "Copied",
   "error.retry": "Try again",
-  "error.network": "No connection to the server"
+  "error.network": "No connection to the server",
+  "theme.toggle": "Theme",
+  "theme.system": "System",
+  "theme.light": "Day",
+  "theme.dark": "Night"
 }
