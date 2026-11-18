@@ -8,7 +8,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # The repository-root .env is read too, so `cd backend && uvicorn ...` (or `python -m
+    # app.seed`) uses the same DATABASE_URL as the rest of the project. Real environment
+    # variables always win over both files.
+    model_config = SettingsConfigDict(env_file=("../.env", ".env"), extra="ignore")
 
     app_env: Literal["dev", "test", "staging", "prod"] = "dev"
     app_name: str = "Sanad API"
@@ -21,6 +24,34 @@ class Settings(BaseSettings):
 
     # Payments: the fake provider must never be enabled in production.
     fake_payments_enabled: bool = True
+    # HMAC key the fake provider signs its webhooks with (dev/test only).
+    fake_payments_webhook_secret: str = "dev-fake-webhook-secret"  # noqa: S105
+    # How long stock stays held for an unpaid order.
+    reservation_ttl_minutes: int = 30
+
+    # --- Translations (i18n module) ---
+    # "none": product texts wait untranslated (buyers see the original);
+    # "claude": machine translation through the Claude API (needs ANTHROPIC_API_KEY).
+    # Outgoing e-mail: console = written to the log (dev); smtp = a real mail server.
+    email_backend: Literal["console", "smtp"] = "console"
+    email_from: str = "Sanad <no-reply@sanad.local>"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_starttls: bool = True
+    public_web_url: str = "http://localhost:3000"
+
+    # Rate limits (app/core/ratelimit.py). Redis is required when several API processes run.
+    rate_limit_enabled: bool = True
+    rate_limit_storage: Literal["memory", "redis"] = "memory"
+    # Behind the compose reverse proxy: take the client IP from X-Forwarded-For.
+    trust_proxy_headers: bool = False
+    max_body_bytes: int = 1_000_000  # bigger JSON bodies -> 413 (files go to S3 directly)
+
+    translator: Literal["none", "claude"] = "none"
+    anthropic_api_key: str = ""
+    translation_model: str = "claude-haiku-5-5"
 
     # --- Auth (ADR 0005) ---
     # Ed25519 private key seed, base64url, 32 bytes. Generate one with:
@@ -45,6 +76,10 @@ class Settings(BaseSettings):
     def _prod_requires_secrets(self) -> "Settings":
         if self.app_env in ("staging", "prod") and not self.jwt_signing_key:
             raise ValueError("JWT_SIGNING_KEY must be set outside dev/test")
+        if self.app_env == "prod" and self.fake_payments_enabled:
+            raise ValueError("FAKE_PAYMENTS_ENABLED must be false in production")
+        if self.app_env == "prod" and self.rate_limit_storage != "redis":
+            raise ValueError("RATE_LIMIT_STORAGE must be redis in production")
         return self
 
 

@@ -10,26 +10,37 @@ Token transport (docs/architecture/05-api-architecture.md, 5.2):
 
 import uuid
 from datetime import UTC, datetime
+from typing import Literal
 
-from fastapi import Depends, Request, Response, status
+from fastapi import Depends, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import Principal, get_principal
+from app.core.auth import (
+    Principal,
+    get_principal,
+    require_permission,
+    require_sensitive_action,
+)
 from app.core.config import get_settings
 from app.core.db import get_session
 from app.core.errors import AppError
 from app.core.modules import module_router
+from app.core.pagination import DEFAULT_LIMIT, MAX_LIMIT, decode_cursor
+from app.core.ratelimit import rate_limit
 from app.core.security import tokens_equal
 from app.modules.identity import service
 from app.modules.identity.schemas import (
     AddressIn,
     AddressOut,
     AddressUpdate,
+    AdminUserOut,
+    BlockIn,
     LoginIn,
     MeOut,
     MeUpdate,
     PasswordChangeIn,
     RegisterIn,
+    RoleOut,
     SessionOut,
     TokenOut,
 )
@@ -94,7 +105,11 @@ def _token_out(response: Response, tokens: service.IssuedTokens) -> TokenOut:
 # ---------------------------------------------------------------- auth
 
 
-@router.post("/auth/register", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/auth/register",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit("auth.register", 10, 3600, per="ip"))],
+)
 async def register(
     data: RegisterIn, request: Request, response: Response, db: AsyncSession = Depends(get_session)
 ) -> TokenOut:
@@ -102,7 +117,7 @@ async def register(
     return _token_out(response, await service.register(db, data, _client(request)))
 
 
-@router.post("/auth/login")
+@router.post("/auth/login", dependencies=[Depends(rate_limit("auth.login", 20, 300, per="ip"))])
 async def login(
     data: LoginIn, request: Request, response: Response, db: AsyncSession = Depends(get_session)
 ) -> TokenOut:
@@ -110,7 +125,7 @@ async def login(
     return _token_out(response, await service.login(db, data, _client(request)))
 
 
-@router.post("/auth/refresh")
+@router.post("/auth/refresh", dependencies=[Depends(rate_limit("auth.refresh", 60, 60, per="ip"))])
 async def refresh(
     request: Request, response: Response, db: AsyncSession = Depends(get_session)
 ) -> TokenOut:
@@ -217,3 +232,76 @@ async def delete_address(
     db: AsyncSession = Depends(get_session),
 ) -> None:
     await service.delete_address(db, principal, address_id)
+
+
+# ---------------------------------------------------------------- admin
+
+
+@router.get("/admin/users")
+async def admin_users(
+    q: str | None = Query(None, max_length=100, description="email, phone or name"),
+    status_: Literal["active", "blocked", "pending"] | None = Query(None, alias="status"),
+    role: str | None = Query(None, max_length=64),
+    cursor: str | None = None,
+    limit: int = Query(DEFAULT_LIMIT, ge=1, le=MAX_LIMIT),
+    _: Principal = Depends(require_permission("users.read")),
+    db: AsyncSession = Depends(get_session),
+) -> list[AdminUserOut]:
+    return await service.admin_users(db, q, status_, role, decode_cursor(cursor, "identity"), limit)
+
+
+@router.get("/admin/users/{user_id}")
+async def admin_user(
+    user_id: uuid.UUID,
+    _: Principal = Depends(require_permission("users.read")),
+    db: AsyncSession = Depends(get_session),
+) -> AdminUserOut:
+    return await service.admin_user(db, user_id)
+
+
+@router.post("/admin/users/{user_id}/block")
+async def block(
+    user_id: uuid.UUID,
+    data: BlockIn,
+    actor: Principal = Depends(require_sensitive_action("users.block")),
+    db: AsyncSession = Depends(get_session),
+) -> AdminUserOut:
+    """Blocks the account and signs it out everywhere (audited)."""
+    return await service.block_user(db, actor, user_id, data)
+
+
+@router.post("/admin/users/{user_id}/unblock")
+async def unblock(
+    user_id: uuid.UUID,
+    actor: Principal = Depends(require_sensitive_action("users.block")),
+    db: AsyncSession = Depends(get_session),
+) -> AdminUserOut:
+    return await service.unblock_user(db, actor, user_id)
+
+
+@router.get("/admin/roles")
+async def roles(
+    _: Principal = Depends(require_permission("users.read")),
+    db: AsyncSession = Depends(get_session),
+) -> list[RoleOut]:
+    return await service.list_roles(db)
+
+
+@router.put("/admin/users/{user_id}/roles/{role_code}")
+async def grant(
+    user_id: uuid.UUID,
+    role_code: str,
+    actor: Principal = Depends(require_sensitive_action("rbac.manage")),
+    db: AsyncSession = Depends(get_session),
+) -> AdminUserOut:
+    return await service.admin_grant_role(db, actor, user_id, role_code)
+
+
+@router.delete("/admin/users/{user_id}/roles/{role_code}")
+async def revoke(
+    user_id: uuid.UUID,
+    role_code: str,
+    actor: Principal = Depends(require_sensitive_action("rbac.manage")),
+    db: AsyncSession = Depends(get_session),
+) -> AdminUserOut:
+    return await service.admin_revoke_role(db, actor, user_id, role_code)

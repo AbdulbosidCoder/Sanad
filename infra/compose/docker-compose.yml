@@ -9,6 +9,9 @@ x-backend: &backend
   environment:
     DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
     REDIS_URL: redis://redis:6379/0
+    # Several API processes share limits through Redis; nginx sets the real client IP.
+    RATE_LIMIT_STORAGE: redis
+    TRUST_PROXY_HEADERS: "true"
   networks: [app, data]
 
 services:

@@ -1,3 +1,4 @@
 proxy_set_header Host $host;
-proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+# nginx is the edge: overwrite (not append) so a client cannot fake its IP for rate limits.
+proxy_set_header X-Forwarded-For $remote_addr;
 proxy_set_header X-Forwarded-Proto $scheme;

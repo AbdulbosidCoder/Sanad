@@ -23,6 +23,8 @@ def _point_to_test_database() -> None:
         url = url.set(database=f"{url.database}_test")
     os.environ["DATABASE_URL"] = url.render_as_string(hide_password=False)
     os.environ["APP_ENV"] = "test"
+    # Tests register many users from one IP; tests/test_hardening.py turns limits on itself.
+    os.environ["RATE_LIMIT_ENABLED"] = "false"
 
 
 _point_to_test_database()

@@ -5,10 +5,10 @@ from app.modules.analytics.api import router
 
 MODULE = ModuleInfo(
     name="analytics",
-    summary="Аналитика продавца: продажи, выручка, просмотры, конверсия, бестселлеры.",
+    summary="Аналитика продавца: выручка, заказы, просмотры, конверсия, товары, рейтинг.",
     router=router,
-    depends_on=("orders", "engagement", "search"),
+    depends_on=("orders", "engagement", "catalog", "inventory", "reviews", "stores"),
     emits=(),
-    listens_to=("OrderPlaced", "ProductViewed", "SearchPerformed"),
-    tables=("seller_daily_stats", "product_daily_stats"),
+    listens_to=(),
+    tables=(),  # V1 reads source tables; daily aggregates come in V2
 )

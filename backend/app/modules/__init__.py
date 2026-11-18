@@ -40,3 +40,11 @@ ALL_MODULES: tuple[ModuleInfo, ...] = (
     audit,
     platform,
 )
+
+
+def setup_all() -> None:
+    """Runs every module's ``setup`` hook (event subscriptions, core plug-ins).
+    Each process calls it once: the API (main.py), the worker and CLI tools."""
+    for module in ALL_MODULES:
+        if module.setup is not None:
+            module.setup()

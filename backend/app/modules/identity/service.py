@@ -27,6 +27,7 @@ from app.core.security import (
     password_needs_rehash,
     verify_password,
 )
+from app.modules.audit import service as audit
 from app.modules.identity import repository as repo
 from app.modules.identity.models import Address, AuthSession, RefreshToken, User, UserCredential
 from app.modules.identity.rbac import CUSTOMER, PERMISSIONS, ROLES, ROLES_BY_CODE
@@ -34,14 +35,17 @@ from app.modules.identity.schemas import (
     AddressIn,
     AddressOut,
     AddressUpdate,
+    AdminUserOut,
+    BlockIn,
     LoginIn,
     MeOut,
     MeUpdate,
     PasswordChangeIn,
     RegisterIn,
+    RoleOut,
     SessionOut,
-    normalize_phone,
 )
+from app.modules.identity.schemas import normalize_phone as normalize_phone  # public helper
 
 MODULE = "identity"
 MAX_ADDRESSES = 20
@@ -107,7 +111,12 @@ async def sync_rbac(db: AsyncSession) -> None:
 
 
 async def grant_role(
-    db: AsyncSession, user_id: uuid.UUID, role_code: str, granted_by: uuid.UUID | None = None
+    db: AsyncSession,
+    user_id: uuid.UUID,
+    role_code: str,
+    granted_by: uuid.UUID | None = None,
+    *,
+    commit: bool = True,
 ) -> None:
     definition = ROLES_BY_CODE.get(role_code)
     if definition is not None and definition.scope != "platform":
@@ -116,7 +125,8 @@ async def grant_role(
     if role is None or role.scope != "platform":
         raise _error("ROLE_NOT_FOUND", f"Unknown platform role: {role_code}", 404)
     await repo.add_user_role(db, user_id, role.id, granted_by)
-    await db.commit()
+    if commit:
+        await db.commit()
     _log("role granted", user_id=user_id, role=role_code, granted_by=granted_by)
 
 
@@ -155,7 +165,8 @@ def _open_session(db: AsyncSession, user: User, client: ClientInfo) -> IssuedTok
 # ---------------------------------------------------------------- auth flows
 
 
-async def register(db: AsyncSession, data: RegisterIn, client: ClientInfo) -> IssuedTokens:
+async def _create_user(db: AsyncSession, data: RegisterIn) -> User:
+    """Inserts a customer with a password (flushed, not committed)."""
     if data.email and await repo.email_exists(db, data.email):
         raise _error("EMAIL_TAKEN", "This email is already registered", 409)
     if data.phone and await repo.phone_exists(db, data.phone):
@@ -171,7 +182,6 @@ async def register(db: AsyncSession, data: RegisterIn, client: ClientInfo) -> Is
         phone=data.phone,
         full_name=data.full_name,
         locale=data.locale,
-        last_login_at=_now(),
     )
     db.add(user)
     db.add(UserCredential(user_id=user.id, type="password", secret=password_hash))
@@ -181,10 +191,67 @@ async def register(db: AsyncSession, data: RegisterIn, client: ClientInfo) -> Is
         await db.rollback()
         raise _error("ACCOUNT_EXISTS", "This email or phone is already registered", 409) from exc
     await repo.add_user_role(db, user.id, role.id)
+    return user
+
+
+async def register(db: AsyncSession, data: RegisterIn, client: ClientInfo) -> IssuedTokens:
+    user = await _create_user(db, data)
+    user.last_login_at = _now()
     tokens = _open_session(db, user, client)
     await db.commit()
     _log("user registered", user_id=user.id)
     return tokens
+
+
+async def create_user(db: AsyncSession, data: RegisterIn) -> uuid.UUID:
+    """Creates a customer account without signing it in (demo data, admin tools).
+    The caller commits."""
+    user = await _create_user(db, data)
+    _log("user created", user_id=user.id)
+    return user.id
+
+
+def store_role_permissions(role_code: str) -> frozenset[str]:
+    """Permissions of a store-scope role (``seller_owner`` ...). Unknown role -> none."""
+    role = ROLES_BY_CODE.get(role_code)
+    if role is None or role.scope != "store":
+        return frozenset()
+    return role.permissions
+
+
+STORE_ROLES: tuple[str, ...] = tuple(r.code for r in ROLES if r.scope == "store")
+
+
+async def user_brief(db: AsyncSession, user_id: uuid.UUID) -> tuple[str | None, str] | None:
+    """(email, full_name) of a user, for staff lists. None if the user does not exist."""
+    user = await repo.get_user(db, user_id)
+    return (user.email, user.full_name) if user else None
+
+
+@dataclass(frozen=True)
+class Contact:
+    """How to reach a user: for notifications."""
+
+    user_id: uuid.UUID
+    email: str | None
+    full_name: str
+    locale: str
+    email_verified: bool
+    active: bool
+
+
+async def contact(db: AsyncSession, user_id: uuid.UUID) -> Contact | None:
+    user = await repo.get_user(db, user_id)
+    if user is None:
+        return None
+    return Contact(
+        user.id,
+        user.email,
+        user.full_name,
+        user.locale,
+        user.email_verified,
+        user.status == "active" and user.deleted_at is None,
+    )
 
 
 async def _find_by_login(db: AsyncSession, login: str) -> User | None:
@@ -426,3 +493,125 @@ async def delete_address(db: AsyncSession, principal: Principal, address_id: uui
         if remaining:
             remaining[0].is_default = True
     await db.commit()
+
+
+async def address_snapshot(
+    db: AsyncSession, user_id: uuid.UUID, address_id: uuid.UUID | None
+) -> dict[str, str | None] | None:
+    """A copy of the user's address for an order: the given one, else the default one."""
+    addresses = [a for a in await repo.list_addresses(db, user_id)]
+    chosen = next(
+        (a for a in addresses if a.id == address_id)
+        if address_id is not None
+        else (a for a in addresses if a.is_default),
+        None,
+    )
+    if chosen is None:
+        return None
+    return {
+        "id": str(chosen.id),
+        "recipient_name": chosen.recipient_name,
+        "phone": chosen.phone,
+        "region": chosen.region,
+        "city": chosen.city,
+        "line1": chosen.line1,
+        "line2": chosen.line2,
+    }
+
+
+# ---------------------------------------------------------------- admin: users and roles
+
+
+async def _admin_out(db: AsyncSession, user: User) -> AdminUserOut:
+    roles, _ = await repo.platform_roles_and_permissions(db, user.id)
+    out = AdminUserOut.model_validate(user)
+    out.roles = sorted(roles)
+    return out
+
+
+async def admin_users(
+    db: AsyncSession, q: str | None, status: str | None, role: str | None, offset: int, limit: int
+) -> list[AdminUserOut]:
+    return [
+        await _admin_out(db, u) for u in await repo.search_users(db, q, status, role, offset, limit)
+    ]
+
+
+async def _target(db: AsyncSession, user_id: uuid.UUID) -> User:
+    user = await repo.get_user(db, user_id)
+    if user is None or user.deleted_at is not None:
+        raise _error("USER_NOT_FOUND", "User not found", 404)
+    return user
+
+
+async def admin_user(db: AsyncSession, user_id: uuid.UUID) -> AdminUserOut:
+    return await _admin_out(db, await _target(db, user_id))
+
+
+async def block_user(
+    db: AsyncSession, actor: Principal, user_id: uuid.UUID, data: BlockIn
+) -> AdminUserOut:
+    """Blocks sign-in and ends every session at once (the next request gets 401)."""
+    if user_id == actor.user_id:
+        raise _error("SELF", "You cannot block yourself", 409)
+    user = await _target(db, user_id)
+    roles, _ = await repo.platform_roles_and_permissions(db, user_id)
+    if "super_admin" in roles and "super_admin" not in actor.roles:
+        raise _error("PROTECTED", "Only a super admin can block a super admin", 403)
+    user.status = "blocked"
+    await repo.revoke_sessions(db, user_id, _now(), "blocked")
+    await audit.record(db, actor.user_id, "users.block", "user", user_id, {"reason": data.reason})
+    await db.commit()
+    _log("user blocked", user_id=user_id, actor=actor.user_id)
+    return await _admin_out(db, user)
+
+
+async def unblock_user(db: AsyncSession, actor: Principal, user_id: uuid.UUID) -> AdminUserOut:
+    user = await _target(db, user_id)
+    user.status = "active"
+    user.failed_login_count = 0
+    user.locked_until = None
+    await audit.record(db, actor.user_id, "users.unblock", "user", user_id)
+    await db.commit()
+    return await _admin_out(db, user)
+
+
+async def list_roles(db: AsyncSession) -> list[RoleOut]:
+    return [
+        RoleOut(
+            code=r.code,
+            scope=r.scope,
+            description=r.description,
+            permissions=sorted(ROLES_BY_CODE[r.code].permissions)
+            if r.code in ROLES_BY_CODE
+            else [],
+        )
+        for r in await repo.all_roles(db)
+    ]
+
+
+async def admin_grant_role(
+    db: AsyncSession, actor: Principal, user_id: uuid.UUID, role_code: str
+) -> AdminUserOut:
+    user = await _target(db, user_id)
+    await grant_role(db, user_id, role_code, actor.user_id, commit=False)
+    await audit.record(db, actor.user_id, "rbac.grant", "user", user_id, {"role": role_code})
+    await db.commit()
+    return await _admin_out(db, user)
+
+
+async def admin_revoke_role(
+    db: AsyncSession, actor: Principal, user_id: uuid.UUID, role_code: str
+) -> AdminUserOut:
+    user = await _target(db, user_id)
+    role = await repo.get_role_by_code(db, role_code)
+    if role is None or role.scope != "platform":
+        raise _error("ROLE_NOT_FOUND", f"Unknown platform role: {role_code}", 404)
+    if role_code == "super_admin" and await repo.count_role_holders(db, role.id) <= 1:
+        raise _error("LAST_SUPER_ADMIN", "The last super admin cannot lose the role", 409)
+    if role_code == CUSTOMER:
+        raise _error("BASE_ROLE", "Every user keeps the customer role", 409)
+    await repo.remove_user_role(db, user_id, role.id)
+    await audit.record(db, actor.user_id, "rbac.revoke", "user", user_id, {"role": role_code})
+    await db.commit()
+    return await _admin_out(db, user)

@@ -2,7 +2,7 @@
 COMPOSE_DEV  = docker compose --env-file .env -f infra/compose/docker-compose.yml -f infra/compose/docker-compose.dev.yml
 COMPOSE_PROD = docker compose --env-file .env -f infra/compose/docker-compose.yml -f infra/compose/docker-compose.prod.yml
 
-.PHONY: help env up down ps logs migrate test lint shell prod-config fe-dev fe-check
+.PHONY: help env up down ps logs migrate seed test lint shell prod-config fe-dev fe-check
 
 help:          ## Show this help
 	@grep -E '^[a-z-]+:.*##' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-12s %s\n", $$1, $$2}'
@@ -24,6 +24,9 @@ logs:          ## Follow logs; one service: make logs s=api
 
 migrate:       ## Apply database migrations
 	$(COMPOSE_DEV) run --rm migrate
+
+seed:          ## Load demo data (10 users, 3 stores, 10 products...); safe to repeat
+	$(COMPOSE_DEV) run --rm api python -m app.seed
 
 test:          ## Run backend tests inside the container
 	$(COMPOSE_DEV) run --rm api pytest

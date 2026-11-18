@@ -74,3 +74,15 @@ python -m app.modules.identity.cli grant-role you@example.com super_admin
 Симптомы, которые обычно ведут сюда: не получается войти, «нет доступа» (403), разлогинивает, не сохраняется язык или адрес.
 
 В ошибке API и в логах ищите `"module": "identity"` и `request_id`.
+
+## Админка пользователей
+
+| Метод | Путь | Право | Что |
+|---|---|---|---|
+| GET | `/admin/users?q=&status=&role=` | `users.read` | Поиск по email, телефону, имени |
+| GET | `/admin/users/{id}` | `users.read` | Пользователь и его роли |
+| POST | `/admin/users/{id}/block` / `unblock` | `users.block` 🔒 | Блокировка сразу завершает все сессии; себя нельзя, super admin — только super admin |
+| GET | `/admin/roles` | `users.read` | Роли и их права |
+| PUT / DELETE | `/admin/users/{id}/roles/{code}` | `rbac.manage` 🔒 | Выдать / забрать роль платформы; последнего super admin и роль customer забрать нельзя |
+
+Всё это пишется в журнал аудита.

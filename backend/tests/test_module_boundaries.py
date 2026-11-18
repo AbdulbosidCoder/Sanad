@@ -20,7 +20,10 @@ def _imports(path: Path) -> list[str]:
     out: list[str] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-            out.append(node.module)
+            if node.module.count(".") == 2:  # from app.modules.x import service
+                out.extend(f"{node.module}.{a.name}" for a in node.names)
+            else:
+                out.append(node.module)
         elif isinstance(node, ast.Import):
             out.extend(a.name for a in node.names)
     return out

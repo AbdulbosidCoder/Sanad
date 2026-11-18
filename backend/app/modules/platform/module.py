@@ -5,10 +5,10 @@ from app.modules.platform.api import router
 
 MODULE = ModuleInfo(
     name="platform",
-    summary="Настройки платформы и feature flags.",
+    summary="Панель эксплуатации: фоновые очереди, их сбои и перезапуск; позже настройки.",
     router=router,
-    depends_on=(),
+    depends_on=("i18n", "notifications", "audit"),
     emits=(),
     listens_to=(),
-    tables=("platform_settings",),
+    tables=(),  # platform settings and feature flags come later
 )

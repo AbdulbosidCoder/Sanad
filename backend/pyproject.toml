@@ -16,6 +16,7 @@ dependencies = [
     "argon2-cffi>=23.1",
     "pyjwt[crypto]>=2.10",
     "email-validator>=2.2",
+    "httpx>=0.28",  # outgoing HTTP: translation API
 ]
 
 [project.optional-dependencies]
@@ -25,7 +26,6 @@ dev = [
     "pytest>=8.3",
     "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",
-    "httpx>=0.28",
     "import-linter>=2.1",
     "pip-audit>=2.7",
 ]
@@ -43,12 +43,16 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S", "ASYNC", "SIM", "RUF"]
-ignore = ["B008"]  # FastAPI dependencies are declared as default arguments
+ignore = [
+    "B008",  # FastAPI dependencies are declared as default arguments
+    "RUF001",  # Cyrillic text (ru/uz) is expected in strings
+]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101", "S105", "S106"]  # asserts and fake test passwords
 "app/modules/**/tests/**" = ["S101", "S105", "S106"]
 "conftest.py" = ["S608"]  # CREATE DATABASE needs an identifier, not a bind parameter
+"migrations/**" = ["E501"]  # generated CHECK constraint strings
 
 [tool.mypy]
 python_version = "3.12"
@@ -63,6 +67,7 @@ ignore_missing_imports = true
 module = ["app.modules.*.tests.*"]  # pytest fixtures are injected untyped, like tests/
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
+disallow_untyped_calls = false
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
