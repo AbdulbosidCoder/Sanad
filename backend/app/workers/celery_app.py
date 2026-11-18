@@ -12,6 +12,7 @@ celery_app.conf.update(
     task_default_queue="default",
     beat_schedule={
         "orders-expire-unpaid": {"task": "orders.expire_unpaid", "schedule": 300.0},
+        "i18n-translate-pending": {"task": "i18n.translate_pending", "schedule": 60.0},
     },
 )
 
@@ -32,3 +33,15 @@ def expire_unpaid_orders() -> int:
 
     setup_all()  # payment/order event handlers live in module setup hooks
     return asyncio.run(expire_unpaid())
+
+
+@celery_app.task(name="i18n.translate_pending")  # type: ignore[untyped-decorator]
+def translate_pending() -> int:
+    """Machine-translates queued product texts (every minute)."""
+    import asyncio
+
+    from app.modules import setup_all
+    from app.modules.i18n.service import translate_pending_job
+
+    setup_all()
+    return asyncio.run(translate_pending_job())

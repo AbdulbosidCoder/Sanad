@@ -9,7 +9,7 @@
 - `media` — загрузка файлов (позже; сейчас фото — это URL)
 - `audit` — (позже)
 
-**Используется модулями:** `inventory` (список вариантов магазина, флаг «в наличии»), позже `i18n`, `search`, `cart`, `reviews`, `engagement`, `recommendations`
+**Используется модулями:** `inventory` (список вариантов магазина, флаг «в наличии»), `i18n` (текст оригинала, события), позже `search`, `cart`, `reviews`, `engagement`, `recommendations`
 
 **Публикует события:** `ProductCreated`, `ProductUpdated`, `ProductArchived` (пока только в лог)
 

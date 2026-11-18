@@ -34,6 +34,7 @@ from app.modules import setup_all
 from app.modules.cart import service as cart
 from app.modules.catalog import service as catalog
 from app.modules.catalog.schemas import BrandIn, CategoryIn, ImageIn, Names, ProductIn, VariantIn
+from app.modules.i18n import service as i18n
 from app.modules.identity import service as identity
 from app.modules.identity.schemas import AddressIn, RegisterIn
 from app.modules.inventory import service as inventory
@@ -239,6 +240,50 @@ PRODUCTS = [
         [15, 20, 12, 6],
     ),
 ]
+
+# Translations of the Russian descriptions (titles are model names and stay the same).
+TRANSLATIONS: dict[str, dict[str, str]] = {
+    "Nike Air Max 90": {
+        "uz": "1990-yil klassikasi: ko'rinadigan Air yostiqchasi, charm va zamsh.",
+        "en": "A 1990 classic: visible Air cushioning, leather and suede.",
+    },
+    "Nike Air Force 1 '07": {
+        "uz": "Har kungi oq charm krossovkalar.",
+        "en": "White leather sneakers for every day.",
+    },
+    "Air Jordan 1 Mid": {
+        "uz": "Basketbol klassikasi kundalik ko'rinishda.",
+        "en": "A basketball classic made for everyday wear.",
+    },
+    "Adidas Samba OG": {
+        "uz": "Charm ustki qism, zamsh qoplamalar, kauchuk taglik.",
+        "en": "Leather upper, suede overlays, gum rubber sole.",
+    },
+    "New Balance 550": {
+        "uz": "80-yillarning retro silueti, charm ustki qism.",
+        "en": "A retro silhouette from the 80s with a leather upper.",
+    },
+    "Asics Gel-Kayano 14": {
+        "uz": "GEL amortizatsiyali 2008-yilgi yugurish silueti.",
+        "en": "A 2008 running silhouette with GEL cushioning.",
+    },
+    "Converse Chuck 70 Hi": {
+        "uz": "Zich kanvasdan baland keda.",
+        "en": "High-top shoes made of heavy canvas.",
+    },
+    "Vans Old Skool": {
+        "uz": "Mashhur chiziqli skeyter kedalari.",
+        "en": "Skate shoes with the signature side stripe.",
+    },
+    "The North Face 1996 Nuptse": {
+        "uz": "700 fill power to'ldiruvchili puxovik.",
+        "en": "Down jacket with 700 fill power insulation.",
+    },
+    "Puma Essentials Big Logo Hoodie": {
+        "uz": "Yumshoq flis, bog'ichli kapyushon.",
+        "en": "Soft fleece, drawstring hood.",
+    },
+}
 
 SIDES = ["left", "right", "top", "sole", "inside", "back", "label"]
 
@@ -475,6 +520,35 @@ async def _seed_orders(db: AsyncSession) -> None:
     print(f"orders: {len(ORDERS)} (paid, shipped, delivered, unpaid, failed, refunded, return)")
 
 
+def _first_sku(n: int, p: DemoProduct) -> str:
+    return f"{p.brand[:3].upper()}-{n + 1:03d}-{p.sizes[0]}"
+
+
+async def _demo_product_ids(db: AsyncSession) -> list[tuple[DemoProduct, uuid.UUID]]:
+    out = []
+    for n, p in enumerate(PRODUCTS):
+        variant_id = await catalog.find_variant_id(db, _first_sku(n, p))
+        if variant_id is not None:
+            sale = (await catalog.variants_for_sale(db, [variant_id]))[variant_id]
+            out.append((p, sale.product_id))
+    return out
+
+
+async def _has_translations(db: AsyncSession) -> bool:
+    ids = await _demo_product_ids(db)
+    return not ids or await i18n.has_translations(db, ids[0][1])
+
+
+async def _seed_translations(db: AsyncSession) -> None:
+    """uz / en versions of the demo products, so the language switch can be tried."""
+    ids = await _demo_product_ids(db)
+    for p, product_id in ids:
+        for locale, text in TRANSLATIONS[p.title].items():
+            await i18n.put_translation(db, product_id, locale, p.title, text, "machine")
+    await db.commit()
+    print(f"translations: {len(ids)} products in uz and en")
+
+
 async def _has_orders(db: AsyncSession) -> bool:
     buyer = await identity.find_user_id(db, f"buyer1@{DOMAIN}")
     return buyer is not None and bool(await orders.list_orders(db, _principal(buyer), 0, 1))
@@ -494,6 +568,9 @@ async def run(if_empty: bool) -> int:
         # Sections added later are loaded into databases seeded by an older version.
         if not await _has_orders(db):
             await _seed_orders(db)
+            changed = True
+        if not await _has_translations(db):
+            await _seed_translations(db)
             changed = True
     if not changed:
         print(f"demo data is already there ({MARKER} exists): nothing to do")

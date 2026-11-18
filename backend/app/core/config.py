@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     # How long stock stays held for an unpaid order.
     reservation_ttl_minutes: int = 30
 
+    # --- Translations (i18n module) ---
+    # "none": product texts wait untranslated (buyers see the original);
+    # "claude": machine translation through the Claude API (needs ANTHROPIC_API_KEY).
+    translator: Literal["none", "claude"] = "none"
+    anthropic_api_key: str = ""
+    translation_model: str = "claude-haiku-5-5"
+
     # --- Auth (ADR 0005) ---
     # Ed25519 private key seed, base64url, 32 bytes. Generate one with:
     #   python -c "import secrets,base64;print(base64.urlsafe_b64encode(

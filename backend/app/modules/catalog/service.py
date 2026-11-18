@@ -11,7 +11,7 @@ Who sees what:
 
 import logging
 import uuid
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -22,11 +22,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import Principal
 from app.core.errors import AppError
+from app.core.events import publish as publish_event
 from app.core.locale import pick
 from app.core.models import uuid7
 from app.core.pagination import Page, next_cursor
 from app.core.text import unique_slug
 from app.modules.catalog import repository as repo
+from app.modules.catalog.events import ProductArchived, ProductCreated, ProductUpdated
 from app.modules.catalog.models import (
     PHOTO_ANGLES,
     Brand,
@@ -81,6 +83,54 @@ def _log(msg: str, **fields: object) -> None:
 
 def _product_not_found() -> AppError:
     return _error("PRODUCT_NOT_FOUND", "Product not found", 404)
+
+
+# ---------------------------------------------------------------- translations hook
+#
+# The i18n module translates product texts. It depends on catalog (not the other way
+# round), so it plugs a lookup in here at startup, like identity does for core.auth.
+TranslationLookup = Callable[
+    [AsyncSession, Sequence[uuid.UUID], str], Awaitable[dict[uuid.UUID, tuple[str, str]]]
+]
+_translations: TranslationLookup | None = None
+
+
+def set_translation_lookup(lookup: TranslationLookup) -> None:
+    global _translations
+    _translations = lookup
+
+
+async def _texts(
+    db: AsyncSession, products: Sequence[Product], locale: str
+) -> dict[uuid.UUID, tuple[str, str]]:
+    """(title, description) per product in ``locale``; the original where none exists."""
+    out = {p.id: (p.title, p.description) for p in products}
+    wanted = [p.id for p in products if p.source_locale != locale]
+    if _translations is not None and wanted:
+        out.update(await _translations(db, wanted, locale))
+    return out
+
+
+@dataclass(frozen=True)
+class ProductSource:
+    product_id: uuid.UUID
+    store_id: uuid.UUID
+    source_locale: str
+    title: str
+    description: str
+
+
+async def product_source(
+    db: AsyncSession, product_id: uuid.UUID, store_id: uuid.UUID | None = None
+) -> ProductSource | None:
+    """The original text of a product (optionally only if it belongs to ``store_id``)."""
+    conds = [Product.id == product_id]
+    if store_id is not None:
+        conds.append(Product.store_id == store_id)
+    p = await repo.find_product(db, *conds)
+    if p is None:
+        return None
+    return ProductSource(p.id, p.store_id, p.source_locale, p.title, p.description)
 
 
 def _visible() -> ColumnElement[bool]:
@@ -274,12 +324,13 @@ def _card_fields(
     refs: tuple[dict[uuid.UUID, RefOut], dict[uuid.UUID, RefOut], dict[uuid.UUID, RefOut]],
     cover: str | None,
     compare_at: Decimal | None,
+    title: str | None = None,
 ) -> dict[str, object]:
     categories, brands, store_refs = refs
     return {
         "id": p.id,
         "slug": p.slug,
-        "title": p.title,
+        "title": title or p.title,
         "min_price": p.min_price,
         "compare_at_price": compare_at,
         "currency": p.currency,
@@ -312,9 +363,13 @@ async def _detail_fields(
     cheapest = min((v for v in variants if v.is_active), key=lambda v: v.price, default=None)
     refs = await _refs(db, [p], locale)
     cover = next((i.url for i in seller if i.status == "approved"), None)
+    # Buyers read their language; the seller sees (and edits) the original.
+    title, description = (
+        (await _texts(db, [p], locale))[p.id] if public else (p.title, p.description)
+    )
     return {
-        **_card_fields(p, refs, cover, cheapest.compare_at_price if cheapest else None),
-        "description": p.description,
+        **_card_fields(p, refs, cover, cheapest.compare_at_price if cheapest else None, title),
+        "description": description,
         "source_locale": p.source_locale,
         "specifications": p.specifications,
         "variants": [VariantOut.model_validate(v) for v in shown_variants],
@@ -374,7 +429,8 @@ async def list_products(
     rows = await repo.list_products(db, _visible(), f, sort, offset, limit + 1)
     page = rows[:limit]
     refs = await _refs(db, [p for p, _, _ in page], locale)
-    items = [ProductCard(**_card_fields(p, refs, c, d)) for p, c, d in page]
+    texts = await _texts(db, [p for p, _, _ in page], locale)
+    items = [ProductCard(**_card_fields(p, refs, c, d, texts[p.id][0])) for p, c, d in page]
     return Page(items=items, next_cursor=next_cursor(offset, limit, len(rows)))
 
 
@@ -523,6 +579,7 @@ async def create_product(
     for v in data.variants:
         db.add(_new_variant(product.id, v))
     await refresh_summary(db, product)
+    await publish_event(db, ProductCreated(product.id, product.store_id, product.source_locale))
     await _commit_unique(db, "SKU_TAKEN", "SKU already used")
     _log("product created", product_id=product.id, store_id=access.store_id)
     return await _seller_out(db, product, locale)
@@ -559,10 +616,13 @@ async def update_product(
     if changes.get("category_id") is None:
         changes.pop("category_id", None)
     await _check_refs(db, changes.get("category_id"), changes.get("brand_id"))
+    text_before = (product.title, product.description, product.source_locale)
     for name, value in changes.items():
         if value is None and name != "brand_id":
             continue
         setattr(product, name, value)
+    if (product.title, product.description, product.source_locale) != text_before:
+        await publish_event(db, ProductUpdated(product.id, product.store_id, product.source_locale))
     await db.commit()
     return await _seller_out(db, product, locale)
 
@@ -591,6 +651,7 @@ async def archive(
     if product.status == "blocked":
         raise _error("PRODUCT_BLOCKED", "Blocked by moderation: contact support", 409)
     product.status = "archived"
+    await publish_event(db, ProductArchived(product.id, product.store_id))
     await db.commit()
     return await _seller_out(db, product, locale)
 
