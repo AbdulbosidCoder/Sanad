@@ -43,6 +43,8 @@ from app.modules.inventory.schemas import StockUpdate
 from app.modules.orders import service as orders
 from app.modules.orders.schemas import CheckoutIn, ReturnIn, StatusIn
 from app.modules.payments import service as payments
+from app.modules.reviews import service as reviews
+from app.modules.reviews.schemas import ReplyIn, ReviewIn
 from app.modules.search import service as search
 from app.modules.stores import service as stores
 from app.modules.stores.schemas import ApplicationIn
@@ -575,6 +577,39 @@ async def _has_engagement(db: AsyncSession) -> bool:
     return buyer is None or bool(await engagement.favorite_product_ids(db, buyer, 1))
 
 
+REVIEW_TEXTS = [
+    (5, "Оригинал, всё как на фото. Доставили за 2 дня.", "true"),
+    (4, "Хорошие, но немного маломерят — берите на размер больше.", "small"),
+    (3, "Нормально, но коробка пришла помятой.", None),
+]
+
+
+async def _seed_reviews(db: AsyncSession) -> None:
+    """Reviews for every delivered demo purchase, with one answer from the store."""
+    written = 0
+    for login in ("buyer1", "buyer2", "buyer3", "buyer4"):
+        buyer = _principal(await _uid(db, login))
+        for _, product_id in await _demo_product_ids(db):
+            check = await reviews.can_review(db, buyer, product_id)
+            if not check.can_review:
+                continue
+            rating, text, fit = REVIEW_TEXTS[written % len(REVIEW_TEXTS)]
+            review = await reviews.create(
+                db, buyer, product_id, ReviewIn(rating=rating, text=text, fit=fit)
+            )
+            store_id = await catalog.product_store(db, product_id)
+            if written == 0 and store_id is not None:
+                access = await _store_of(db, await _uid(db, "seller1"), store_id)
+                await reviews.reply(db, access, review.id, ReplyIn(text="Спасибо за отзыв!"))
+            written += 1
+    print(f"reviews: {written}")
+
+
+async def _has_reviews(db: AsyncSession) -> bool:
+    buyer = await identity.find_user_id(db, f"buyer1@{DOMAIN}")
+    return buyer is None or bool(await reviews.my_reviews(db, _principal(buyer)))
+
+
 async def _has_orders(db: AsyncSession) -> bool:
     buyer = await identity.find_user_id(db, f"buyer1@{DOMAIN}")
     return buyer is not None and bool(await orders.list_orders(db, _principal(buyer), 0, 1))
@@ -600,6 +635,9 @@ async def run(if_empty: bool) -> int:
             changed = True
         if await search.is_empty(db):
             print(f"search index: {await search.reindex_all(db)} products")
+            changed = True
+        if not await _has_reviews(db):
+            await _seed_reviews(db)
             changed = True
         if not await _has_engagement(db):
             await _seed_engagement(db)

@@ -930,3 +930,33 @@ async def variants_for_sale(
 
 async def find_variant_id(db: AsyncSession, sku: str) -> uuid.UUID | None:
     return await repo.variant_id_by_sku(db, sku)
+
+
+async def set_rating(db: AsyncSession, product_id: uuid.UUID, avg: Decimal, count: int) -> None:
+    """Called by the reviews module after a review is published, edited or hidden."""
+    p = await repo.find_product(db, Product.id == product_id)
+    if p is not None:
+        p.rating_avg, p.rating_count = avg, count
+
+
+async def product_store(db: AsyncSession, product_id: uuid.UUID) -> uuid.UUID | None:
+    p = await repo.find_product(db, Product.id == product_id)
+    return p.store_id if p else None
+
+
+@dataclass(frozen=True)
+class ProductRef:
+    product_id: uuid.UUID
+    slug: str
+    title: str
+    status: str
+    rating_avg: Decimal
+    rating_count: int
+
+
+async def store_product_refs(db: AsyncSession, store_id: uuid.UUID) -> list[ProductRef]:
+    """All (not deleted) products of a store, newest first — for analytics."""
+    return [
+        ProductRef(p.id, p.slug, p.title, p.status, p.rating_avg, p.rating_count)
+        for p in await repo.store_products(db, store_id, None, 0, 10_000)
+    ]

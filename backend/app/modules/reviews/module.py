@@ -5,9 +5,9 @@ from app.modules.reviews.api import router
 
 MODULE = ModuleInfo(
     name="reviews",
-    summary="Отзывы и рейтинги (только по купленным товарам).",
+    summary="Отзывы и рейтинги: только после доставки, ответ магазина, модерация.",
     router=router,
-    depends_on=("orders", "catalog"),
+    depends_on=("orders", "catalog", "identity", "stores"),
     emits=("ReviewPublished",),
     listens_to=(),
     tables=("reviews",),

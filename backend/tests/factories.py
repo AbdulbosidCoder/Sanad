@@ -162,3 +162,38 @@ async def buyer_with_address(client: AsyncClient) -> Login:
 
 def key() -> dict[str, str]:
     return {"Idempotency-Key": uuid.uuid4().hex}
+
+
+async def delivered_purchase(
+    client: AsyncClient, shop: Shop, variant_id: str, buyer: Login, quantity: int = 1
+) -> Json:
+    """Buyer (with an address) buys, pays, and the store ships and delivers. Returns the order."""
+    r = await client.post(
+        f"{API}/cart/items",
+        json={"variant_id": variant_id, "quantity": quantity},
+        headers=buyer.auth,
+    )
+    assert r.status_code == 200, r.text
+    r = await client.post(f"{API}/checkout", json={}, headers={**buyer.auth, **key()})
+    assert r.status_code == 201, r.text
+    placed: Json = r.json()
+    r = await client.post(
+        f"{API}/payments/{placed['payment']['id']}/confirm",
+        json={"outcome": "succeeded"},
+        headers=buyer.auth,
+    )
+    assert r.status_code == 200, r.text
+    parts = (await client.get(f"{API}/seller/orders", headers=shop.headers)).json()
+    part = next(p for p in parts if p["order_id"] == placed["order"]["id"])
+    for status, extra in (
+        ("confirmed", {}),
+        ("shipped", {"tracking_number": "UZ1"}),
+        ("delivered", {}),
+    ):
+        r = await client.patch(
+            f"{API}/seller/orders/{part['id']}/status",
+            json={"status": status, **extra},
+            headers=shop.headers,
+        )
+        assert r.status_code == 200, r.text
+    return placed
