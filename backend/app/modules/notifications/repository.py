@@ -55,3 +55,17 @@ async def pending_emails(db: AsyncSession, limit: int) -> Sequence[EmailOutbox]:
             .with_for_update(skip_locked=True)
         )
     ).all()
+
+
+async def outbox_counts(db: AsyncSession) -> dict[str, int]:
+    rows = await db.execute(select(EmailOutbox.status, func.count()).group_by(EmailOutbox.status))
+    return {s: int(n) for s, n in rows.all()}
+
+
+async def retry_failed_emails(db: AsyncSession) -> int:
+    result = await db.execute(
+        update(EmailOutbox)
+        .where(EmailOutbox.status == "failed")
+        .values(status="pending", attempts=0, last_error=None)
+    )
+    return int(result.rowcount or 0)  # type: ignore[attr-defined]

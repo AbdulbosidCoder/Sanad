@@ -10,6 +10,7 @@ from app.core.db import get_session
 from app.core.locale import Locale, request_locale
 from app.core.modules import module_router
 from app.core.pagination import DEFAULT_LIMIT, MAX_LIMIT, Page, decode_cursor
+from app.core.ratelimit import rate_limit
 from app.modules.catalog.service import ProductCard
 from app.modules.engagement import service
 from app.modules.engagement.schemas import FavoriteState, ViewOut
@@ -58,7 +59,10 @@ async def remove(
     return await service.remove_favorite(db, principal, product_id)
 
 
-@router.post("/products/{product_id}/views")
+@router.post(
+    "/products/{product_id}/views",
+    dependencies=[Depends(rate_limit("engagement.view", 120, 60, per="ip"))],
+)
 async def view(
     product_id: uuid.UUID,
     request: Request,

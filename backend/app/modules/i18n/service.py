@@ -266,3 +266,14 @@ async def retranslate(
         db.add(TranslationJob(id=uuid7(), product_id=product_id, locale=locale))
     await db.commit()
     return await product_translations(db, access, product_id)
+
+
+async def job_counts(db: AsyncSession) -> dict[str, int]:
+    """Translation jobs by status (ops dashboard)."""
+    return await repo.job_counts(db)
+
+
+async def retry_failed_jobs(db: AsyncSession) -> int:
+    count = await repo.retry_failed(db)
+    await db.commit()
+    return count

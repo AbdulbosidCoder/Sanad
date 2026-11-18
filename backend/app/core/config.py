@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     smtp_starttls: bool = True
     public_web_url: str = "http://localhost:3000"
 
+    # Rate limits (app/core/ratelimit.py). Redis is required when several API processes run.
+    rate_limit_enabled: bool = True
+    rate_limit_storage: Literal["memory", "redis"] = "memory"
+    # Behind the compose reverse proxy: take the client IP from X-Forwarded-For.
+    trust_proxy_headers: bool = False
+    max_body_bytes: int = 1_000_000  # bigger JSON bodies -> 413 (files go to S3 directly)
+
     translator: Literal["none", "claude"] = "none"
     anthropic_api_key: str = ""
     translation_model: str = "claude-haiku-5-5"
@@ -71,6 +78,8 @@ class Settings(BaseSettings):
             raise ValueError("JWT_SIGNING_KEY must be set outside dev/test")
         if self.app_env == "prod" and self.fake_payments_enabled:
             raise ValueError("FAKE_PAYMENTS_ENABLED must be false in production")
+        if self.app_env == "prod" and self.rate_limit_storage != "redis":
+            raise ValueError("RATE_LIMIT_STORAGE must be redis in production")
         return self
 
 

@@ -45,25 +45,32 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-    identity --> stores
-    media --> catalog
+    audit --> identity --> stores
     stores --> catalog
-    stores --> inventory
     catalog --> i18n --> search
     catalog --> inventory --> cart --> orders
     payments --> orders
     stores --> orders
+    identity --> orders
     orders --> reviews
     catalog --> engagement --> recommendations
     orders --> recommendations
     orders --> analytics
     engagement --> analytics
-    search --> analytics
+    reviews --> analytics
     identity --> support
     orders --> support
     identity --> notifications
-    audit -.->|"и другие чувствительные действия"| orders
+    stores --> notifications
+    i18n --> platform
+    notifications --> platform
+    audit -.->|"пишут: stores, orders, payments, reviews, support, platform"| orders
 ```
+
+События (`events.py`) — вторые связи, пунктиром не нарисованы: `orders` → `notifications`
+(`OrderPaid`, `SellerOrderStatusChanged`, `OrderCancelled`), `payments` → `orders` (`PaymentSucceeded`),
+`catalog` → `i18n`, `search` (`ProductCreated/Updated`), `i18n` → `search` (`TranslationReady`),
+`inventory` → `notifications` (`StockLow`), `stores` → `notifications`, `support` → `notifications` (`TicketReplied`).
 
 Стрелка `A --> B` значит: «B использует A». Если сломался A, проблемы могут быть и в B, но не наоборот.
 
@@ -72,7 +79,8 @@ flowchart TB
 1. **Слои внутри модуля:** `api.py` (принимает HTTP) → `service.py` (бизнес-логика) → `repository.py` (запросы в БД) → `models.py` (таблицы).
 2. **Модули общаются только через `service.py` и `events.py`** другого модуля и только с теми, кто указан в `depends_on` в `module.py`. Тест `tests/test_module_boundaries.py` ломает CI, если правило нарушено.
 3. **Карта не врёт:** `tests/test_modules.py` проверяет, что у каждого модуля есть README, что зависимости существуют и не образуют цикл, а каждое слушаемое событие кто-то публикует.
-4. **Долгая работа — в фоне через события.** Например, `catalog` сохраняет товар и публикует `ProductCreated`, а `i18n` и `search` в воркере переводят и индексируют его.
+4. **События обрабатываются в той же транзакции.** `catalog` сохраняет товар и публикует `ProductCreated`: `search` сразу индексирует его, `i18n` ставит задачу перевода. Откатился товар — откатились и они. Обработчики подписываются в `setup` модуля (`app.modules.setup_all()` — в API, воркере и `app.seed`).
+5. **Медленное и внешнее — через очередь-таблицу и воркер.** Перевод (`translation_jobs`) и письма (`email_outbox`) пишутся в транзакции, а выполняются воркером раз в минуту. Упал внешний сервис — заказ всё равно проходит, задача ждёт. Очереди видны в `GET /api/v1/admin/ops`.
 
 ## 11.3 Как найти, где баг
 
@@ -112,15 +120,20 @@ make logs s=api | grep 3f9c2a1b7e8d4c6f9a0b1c2d3e4f5a6b
 | Продавец не видит свою панель или магазин | `stores` | Членство в магазине, статус заявки |
 | Товар не сохраняется, неверная цена | `catalog` | Ошибка валидации (`VALIDATION_ERROR`, поле `errors`) |
 | Товар есть в панели продавца, но не виден на витрине | `catalog` | Статус товара (`active`?), не приостановлен ли магазин (`stores`) |
-| Нет перевода на uz/en | `i18n` | Контейнер `worker` жив? |
-| Товар не находится в поиске | `search` | `worker` (индексация), есть ли перевод |
+| Нет перевода на uz/en | `i18n` | `beat` и `worker` живы? `TRANSLATOR=claude` и ключ заданы? `translation_jobs.last_error` |
+| Товар не находится в поиске | `search` | `search_documents` для товара; после переименования бренда — `POST /admin/search/reindex` |
+| Пустые блоки на главной | `recommendations` | Есть ли просмотры (`engagement`) и оплаченные заказы за 7 дней |
+| Нельзя оставить отзыв | `reviews` | Заказ доставлен (`delivered`)? Уже есть отзыв? (`can-review`) |
 | «Нет в наличии», хотя товар есть | `inventory` | Резервы неоплаченных заказов |
 | Не добавляется в корзину, неверная сумма | `cart` | Остатки, активен ли вариант |
 | Заказ не создаётся или не разделился по продавцам | `orders` | `inventory`, `payments` |
 | Оплата зависла, двойное списание | `payments` | Вебхуки, `Idempotency-Key` |
-| Не пришло письмо или уведомление | `notifications` | `worker`, mailpit (`http://localhost:8025` в dev) |
+| Не пришло письмо или уведомление | `notifications` | `email_outbox.status/last_error`, `EMAIL_BACKEND`, `beat` и `worker` |
+| Тикет не виден агенту | `support` | Назначен другому агенту? Нужны `support.tickets_read` |
+| Кто это сделал? | `audit` | `GET /admin/audit?target_id=…`; целостность — `/admin/audit/verify` |
+| Ответ 429 `PLATFORM.RATE_LIMITED` | `app/core/ratelimit.py` | Лимит правила, заголовок `Retry-After` |
 | Не грузятся фото | `media` | Контейнер `minio` |
-| Цифры в дашборде продавца не сходятся | `analytics` | `beat` (ночные пересчёты) |
+| Цифры в дашборде продавца не сходятся | `analytics` | Считается по оплаченным, не отменённым заказам; период `?days=` |
 | Сайт не открывается совсем | — | `make ps`: `proxy` и `api` здоровы? |
 | Страница сайта белая или «Что-то пошло не так» без кода модуля | фронтенд | `make logs s=web` (или `seller` / `admin`), консоль браузера |
 | Всё медленно или 503 | — | `/health/ready`: `database` / `redis` |

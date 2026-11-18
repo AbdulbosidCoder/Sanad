@@ -12,6 +12,7 @@ from app.core.db import get_session
 from app.core.locale import Locale, request_locale
 from app.core.modules import module_router
 from app.core.pagination import DEFAULT_LIMIT, MAX_LIMIT, Page, decode_cursor
+from app.core.ratelimit import rate_limit
 from app.modules.catalog import service
 from app.modules.catalog.repository import Sort
 from app.modules.catalog.schemas import (
@@ -125,7 +126,11 @@ async def product(
     return await service.get_product(db, slug, locale)
 
 
-@router.post("/products/{product_id}/buyer-photos", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/products/{product_id}/buyer-photos",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit("catalog.buyer_photo", 20, 3600))],
+)
 async def add_buyer_photo(
     product_id: uuid.UUID,
     data: ImageIn,

@@ -3,7 +3,7 @@
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.i18n.models import ProductTranslation, TranslationJob
@@ -60,3 +60,19 @@ async def pending_locales(db: AsyncSession, product_id: uuid.UUID) -> set[str]:
         )
     )
     return set(rows.all())
+
+
+async def job_counts(db: AsyncSession) -> dict[str, int]:
+    rows = await db.execute(
+        select(TranslationJob.status, func.count()).group_by(TranslationJob.status)
+    )
+    return {s: int(n) for s, n in rows.all()}
+
+
+async def retry_failed(db: AsyncSession) -> int:
+    result = await db.execute(
+        update(TranslationJob)
+        .where(TranslationJob.status == "failed")
+        .values(status="pending", attempts=0, last_error=None)
+    )
+    return int(result.rowcount or 0)  # type: ignore[attr-defined]

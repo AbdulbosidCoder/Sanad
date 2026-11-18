@@ -26,6 +26,7 @@ from app.core.db import get_session
 from app.core.errors import AppError
 from app.core.modules import module_router
 from app.core.pagination import DEFAULT_LIMIT, MAX_LIMIT, decode_cursor
+from app.core.ratelimit import rate_limit
 from app.core.security import tokens_equal
 from app.modules.identity import service
 from app.modules.identity.schemas import (
@@ -104,7 +105,11 @@ def _token_out(response: Response, tokens: service.IssuedTokens) -> TokenOut:
 # ---------------------------------------------------------------- auth
 
 
-@router.post("/auth/register", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/auth/register",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit("auth.register", 10, 3600, per="ip"))],
+)
 async def register(
     data: RegisterIn, request: Request, response: Response, db: AsyncSession = Depends(get_session)
 ) -> TokenOut:
@@ -112,7 +117,7 @@ async def register(
     return _token_out(response, await service.register(db, data, _client(request)))
 
 
-@router.post("/auth/login")
+@router.post("/auth/login", dependencies=[Depends(rate_limit("auth.login", 20, 300, per="ip"))])
 async def login(
     data: LoginIn, request: Request, response: Response, db: AsyncSession = Depends(get_session)
 ) -> TokenOut:
@@ -120,7 +125,7 @@ async def login(
     return _token_out(response, await service.login(db, data, _client(request)))
 
 
-@router.post("/auth/refresh")
+@router.post("/auth/refresh", dependencies=[Depends(rate_limit("auth.refresh", 60, 60, per="ip"))])
 async def refresh(
     request: Request, response: Response, db: AsyncSession = Depends(get_session)
 ) -> TokenOut:

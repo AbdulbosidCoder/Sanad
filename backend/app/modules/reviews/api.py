@@ -10,6 +10,7 @@ from app.core.auth import Principal, get_optional_principal, get_principal, requ
 from app.core.db import get_session
 from app.core.modules import module_router
 from app.core.pagination import DEFAULT_LIMIT, MAX_LIMIT, Page, decode_cursor
+from app.core.ratelimit import rate_limit
 from app.modules.reviews import service
 from app.modules.reviews.schemas import (
     CanReview,
@@ -58,14 +59,20 @@ async def can_review(
     return await service.can_review(db, principal, product_id)
 
 
-@router.post("/products/{product_id}/reviews", status_code=201)
+@router.post(
+    "/products/{product_id}/reviews",
+    status_code=201,
+    dependencies=[Depends(rate_limit("reviews.create", 10, 3600))],
+)
 async def create(
     product_id: uuid.UUID,
     data: ReviewIn,
     principal: Principal = Depends(get_principal),
     db: AsyncSession = Depends(get_session),
 ) -> ReviewOut:
-    """Only after the product was delivered to you. Photos: POST /products/{slug}/buyer-photos."""
+    """Only after the product was delivered to you.
+
+    Photos go to POST /products/{product_id}/buyer-photos."""
     return await service.create(db, principal, product_id, data)
 
 

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import Principal, get_principal, require_permission, require_sensitive_action
 from app.core.db import get_session
 from app.core.modules import module_router
+from app.core.ratelimit import rate_limit
 from app.modules.orders import service
 from app.modules.orders.schemas import (
     CancelIn,
@@ -42,7 +43,7 @@ async def preview(
     return await service.preview(db, principal, data)
 
 
-@router.post("/checkout", status_code=201)
+@router.post("/checkout", status_code=201, dependencies=[Depends(rate_limit("checkout", 10, 60))])
 async def checkout(
     data: CheckoutIn,
     idempotency_key: str = Header(

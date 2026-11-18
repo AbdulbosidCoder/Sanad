@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import Principal, get_principal, require_permission, require_sensitive_action
 from app.core.db import get_session
 from app.core.modules import module_router
+from app.core.ratelimit import rate_limit
 from app.modules.stores import service
 from app.modules.stores.schemas import (
     ApplicationIn,
@@ -44,7 +45,11 @@ async def public_store(slug: str, db: AsyncSession = Depends(get_session)) -> St
 # ---------------------------------------------------------------- seller
 
 
-@router.post("/seller/applications", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/seller/applications",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(rate_limit("stores.apply", 5, 86400))],
+)
 async def apply(
     data: ApplicationIn,
     principal: Principal = Depends(get_principal),

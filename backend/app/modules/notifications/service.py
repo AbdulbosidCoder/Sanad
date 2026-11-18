@@ -307,3 +307,14 @@ async def update_preferences(
         p.muted_kinds = sorted(set(data.muted_kinds))
     await db.commit()
     return _prefs_out(p)
+
+
+async def outbox_counts(db: AsyncSession) -> dict[str, int]:
+    """E-mails by status (ops dashboard)."""
+    return await repo.outbox_counts(db)
+
+
+async def retry_failed_emails(db: AsyncSession) -> int:
+    count = await repo.retry_failed_emails(db)
+    await db.commit()
+    return count

@@ -9,6 +9,7 @@ from app.core.auth import Principal, get_principal, require_permission
 from app.core.db import get_session
 from app.core.modules import module_router
 from app.core.pagination import DEFAULT_LIMIT, MAX_LIMIT, decode_cursor
+from app.core.ratelimit import rate_limit
 from app.modules.support import service
 from app.modules.support.schemas import (
     AssignIn,
@@ -32,7 +33,11 @@ def _offset(cursor: str | None) -> int:
     return decode_cursor(cursor, "support")
 
 
-@router.post("/support/tickets", status_code=201)
+@router.post(
+    "/support/tickets",
+    status_code=201,
+    dependencies=[Depends(rate_limit("support.create", 5, 600))],
+)
 async def create(
     data: TicketIn,
     principal: Principal = Depends(get_principal),

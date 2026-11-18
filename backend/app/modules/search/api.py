@@ -10,6 +10,7 @@ from app.core.db import get_session
 from app.core.locale import Locale, request_locale
 from app.core.modules import module_router
 from app.core.pagination import DEFAULT_LIMIT, MAX_LIMIT, Page, decode_cursor
+from app.core.ratelimit import rate_limit
 from app.modules.catalog.service import ProductCard, Sort
 from app.modules.search import service
 from app.modules.search.schemas import HistoryItem, PopularQuery, SuggestOut
@@ -17,7 +18,7 @@ from app.modules.search.schemas import HistoryItem, PopularQuery, SuggestOut
 router = module_router("search")
 
 
-@router.get("/search")
+@router.get("/search", dependencies=[Depends(rate_limit("search", 60, 60))])
 async def search(
     q: str = Query(..., min_length=1, max_length=100),
     category: str | None = None,
@@ -51,7 +52,7 @@ async def search(
     )
 
 
-@router.get("/search/suggest")
+@router.get("/search/suggest", dependencies=[Depends(rate_limit("search.suggest", 120, 60))])
 async def suggest(
     q: str = Query(..., max_length=100),
     locale: Locale = Depends(request_locale),

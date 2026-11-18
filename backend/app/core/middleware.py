@@ -63,3 +63,48 @@ class RequestContextMiddleware(BaseHTTPMiddleware):
             return response
         finally:
             context.reset(token)
+
+
+# Strict defaults for a JSON API. The docs page (dev only) needs scripts from a CDN.
+_API_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+_DOCS_CSP = (
+    "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https:; "
+    "frame-ancestors 'none'"
+)
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """Security headers on every response, and a size limit for request bodies."""
+
+    def __init__(self, app: object, *, hsts: bool, max_body_bytes: int) -> None:
+        super().__init__(app)  # type: ignore[arg-type]
+        self.hsts = hsts
+        self.max_body_bytes = max_body_bytes
+
+    async def dispatch(
+        self, request: Request, call_next: Callable[[Request], Awaitable[Response]]
+    ) -> Response:
+        length = request.headers.get("content-length")
+        if length is not None and length.isdigit() and int(length) > self.max_body_bytes:
+            response: Response = problem(
+                413,
+                "PAYLOAD_TOO_LARGE",
+                "Request body is too large",
+                "-",
+            )
+        else:
+            response = await call_next(request)
+        h = response.headers
+        h.setdefault("X-Content-Type-Options", "nosniff")
+        h.setdefault("X-Frame-Options", "DENY")
+        h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        h.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+        h.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+        docs = request.url.path.endswith(("/docs", "/openapi.json"))
+        h.setdefault("Content-Security-Policy", _DOCS_CSP if docs else _API_CSP)
+        if self.hsts:
+            h.setdefault("Strict-Transport-Security", "max-age=63072000; includeSubDomains")
+        if request.url.path.startswith(("/api/v1/me", "/api/v1/auth", "/api/v1/admin")):
+            h.setdefault("Cache-Control", "no-store")
+        return response

@@ -24,12 +24,20 @@ class AppError(Exception):
     Example: ``raise AppError("orders", "OUT_OF_STOCK", "Not enough stock", status=409)``
     """
 
-    def __init__(self, module: str, code: str, detail: str, status: int = 400) -> None:
+    def __init__(
+        self,
+        module: str,
+        code: str,
+        detail: str,
+        status: int = 400,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         super().__init__(detail)
         self.module = module
         self.code = code
         self.detail = detail
         self.status = status
+        self.headers = headers or {}
 
 
 def problem(
@@ -59,7 +67,9 @@ def register_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def app_error(_: Request, exc: AppError) -> JSONResponse:
         logger.info("business error %s.%s: %s", exc.module, exc.code, exc.detail)
-        return problem(exc.status, exc.code, "Request failed", exc.module, exc.detail)
+        response = problem(exc.status, exc.code, "Request failed", exc.module, exc.detail)
+        response.headers.update(exc.headers)
+        return response
 
     @app.exception_handler(RequestValidationError)
     async def validation_error(_: Request, exc: RequestValidationError) -> JSONResponse:
