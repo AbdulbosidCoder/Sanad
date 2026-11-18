@@ -93,7 +93,7 @@ async def products(
     price_max: Decimal | None = Query(None, ge=0),
     in_stock: bool | None = None,
     rating_min: Decimal | None = Query(None, ge=0, le=5),
-    sort: Sort = "newest",
+    sort: Sort | None = Query(None, description="default: relevance with q, otherwise newest"),
     cursor: str | None = Cursor,
     limit: int = Limit,
     locale: Locale = Depends(request_locale),
@@ -111,7 +111,7 @@ async def products(
         in_stock=in_stock,
         rating_min=rating_min,
         sizes=size,
-        sort=sort,
+        sort=sort or ("relevance" if q else "newest"),
         offset=_offset(cursor),
         limit=limit,
     )

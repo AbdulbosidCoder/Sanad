@@ -176,6 +176,13 @@ async def put_translation(
         job.finished_at = datetime.now(UTC)
 
 
+async def texts_of(db: AsyncSession, product_id: uuid.UUID) -> list[tuple[str, str, str]]:
+    """(locale, title, description) of every translation of a product (search index)."""
+    return [
+        (t.locale, t.title, t.description) for t in await repo.translations_of(db, [product_id])
+    ]
+
+
 async def has_translations(db: AsyncSession, product_id: uuid.UUID) -> bool:
     return bool(await repo.translations_of(db, [product_id]))
 

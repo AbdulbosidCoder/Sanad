@@ -15,6 +15,7 @@ from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import ColumnElement, and_
 from sqlalchemy.exc import IntegrityError
@@ -37,15 +38,14 @@ from app.modules.catalog.models import (
     ProductImage,
     ProductVariant,
 )
-from app.modules.catalog.repository import ProductFilter, Sort
+from app.modules.catalog.repository import ProductFilter
+from app.modules.catalog.repository import Sort as Sort  # re-exported for search
 from app.modules.catalog.schemas import (
     BrandAdminOut,
     BrandIn,
-    BrandOut,
     BrandUpdate,
     CategoryAdminOut,
     CategoryIn,
-    CategoryOut,
     CategoryUpdate,
     FiltersOut,
     ImageIn,
@@ -53,7 +53,6 @@ from app.modules.catalog.schemas import (
     ModerateIn,
     PhotoCoverage,
     PriceRange,
-    ProductCard,
     ProductDetail,
     ProductIn,
     ProductUpdate,
@@ -63,6 +62,9 @@ from app.modules.catalog.schemas import (
     VariantOut,
     VariantUpdate,
 )
+from app.modules.catalog.schemas import BrandOut as BrandOut
+from app.modules.catalog.schemas import CategoryOut as CategoryOut
+from app.modules.catalog.schemas import ProductCard as ProductCard
 from app.modules.stores import service as stores
 from app.modules.stores.service import StoreAccess
 
@@ -109,6 +111,65 @@ async def _texts(
     if _translations is not None and wanted:
         out.update(await _translations(db, wanted, locale))
     return out
+
+
+# ---------------------------------------------------------------- search hook
+#
+# The search module keeps a full-text index of products. Like i18n it depends on catalog,
+# so it installs a matcher: query text -> subquery (product_id, rank). Without it the
+# catalog falls back to a simple ILIKE on the title and brand.
+SearchMatcher = Callable[[str], Any]
+_matcher: SearchMatcher | None = None
+
+
+def set_search_matcher(matcher: SearchMatcher | None) -> None:
+    global _matcher
+    _matcher = matcher
+
+
+@dataclass(frozen=True)
+class SearchFields:
+    """Everything the search index needs about one product (original text only)."""
+
+    product_id: uuid.UUID
+    title: str
+    description: str
+    brand: str | None
+    categories: list[str]  # names of the category and its parents, in all languages
+
+
+async def search_fields(db: AsyncSession, product_id: uuid.UUID) -> SearchFields | None:
+    p = await repo.find_product(db, Product.id == product_id)
+    if p is None:
+        return None
+    brand = await repo.get_brand(db, p.brand_id) if p.brand_id else None
+    names: list[str] = []
+    category_id: uuid.UUID | None = p.category_id
+    while category_id is not None and len(names) < 30:
+        category = await repo.get_category(db, category_id)
+        if category is None:
+            break
+        names.extend(v for v in category.names.values() if v)
+        category_id = category.parent_id
+    return SearchFields(p.id, p.title, p.description, brand.name if brand else None, names)
+
+
+async def all_product_ids(db: AsyncSession) -> Sequence[uuid.UUID]:
+    return await repo.all_product_ids(db)
+
+
+async def product_cards(
+    db: AsyncSession, product_ids: Sequence[uuid.UUID], locale: str
+) -> list[ProductCard]:
+    """Buyer-visible cards for ``product_ids`` in that order (hidden ones are left out)."""
+    if not product_ids:
+        return []
+    f = ProductFilter(product_ids=list(product_ids))
+    rows = await repo.list_products(db, _visible(), f, "newest", 0, len(product_ids))
+    refs = await _refs(db, [p for p, _, _ in rows], locale)
+    texts = await _texts(db, [p for p, _, _ in rows], locale)
+    cards = {p.id: ProductCard(**_card_fields(p, refs, c, d, texts[p.id][0])) for p, c, d in rows}
+    return [cards[i] for i in product_ids if i in cards]
 
 
 @dataclass(frozen=True)
@@ -420,6 +481,7 @@ async def list_products(
         brand_slugs=list(brands),
         store_id=store_id,
         q=q.strip() if q and q.strip() else None,
+        match=_matcher(q.strip()) if _matcher and q and q.strip() else None,
         price_min=price_min,
         price_max=price_max,
         in_stock=in_stock,

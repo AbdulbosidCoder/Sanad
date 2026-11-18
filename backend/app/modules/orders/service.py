@@ -16,7 +16,8 @@ import secrets
 import uuid
 from collections import defaultdict
 from collections.abc import Sequence
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from sqlalchemy.exc import IntegrityError
@@ -708,3 +709,45 @@ async def purchased_item(
 ) -> uuid.UUID | None:
     """Order item proving the user bought and received the product (reviews, buyer photos)."""
     return await repo.purchased(db, user_id, product_id)
+
+
+# ---------------------------------------------------------------- statistics (analytics, home)
+
+
+@dataclass(frozen=True)
+class DaySales:
+    day: date
+    orders: int
+    revenue: Decimal
+    commission: Decimal
+
+
+async def best_sellers(
+    db: AsyncSession, days: int, limit: int, store_id: uuid.UUID | None = None
+) -> list[tuple[uuid.UUID, int]]:
+    """(product_id, units sold) in paid, not cancelled orders of the last ``days``."""
+    return await repo.best_sellers(db, datetime.now(UTC) - timedelta(days=days), limit, store_id)
+
+
+async def store_sales(
+    db: AsyncSession, store_id: uuid.UUID, since: datetime, until: datetime
+) -> list[DaySales]:
+    return [DaySales(*row) for row in await repo.store_sales(db, store_id, since, until)]
+
+
+async def store_order_counts(
+    db: AsyncSession, store_id: uuid.UUID, since: datetime, until: datetime
+) -> dict[str, int]:
+    """Seller orders by status created in the period (all, paid or not)."""
+    return await repo.store_order_counts(db, store_id, since, until)
+
+
+async def product_sales(
+    db: AsyncSession, store_id: uuid.UUID, since: datetime, until: datetime
+) -> dict[uuid.UUID, tuple[int, Decimal]]:
+    """product_id -> (units, revenue)."""
+    return await repo.product_sales(db, store_id, since, until)
+
+
+async def bought_by_user(db: AsyncSession, user_id: uuid.UUID, limit: int = 20) -> list[uuid.UUID]:
+    return await repo.bought_by_user(db, user_id, limit)

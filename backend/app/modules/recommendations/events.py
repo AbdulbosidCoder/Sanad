@@ -1,5 +1,5 @@
 """Domain events of the `recommendations` module.
 
-Emits: nothing yet
-Listens to: ProductViewed, OrderPlaced
+Emits: nothing
+Listens to: nothing (reads views, favourites and sales on request)
 """

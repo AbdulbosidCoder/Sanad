@@ -2,6 +2,8 @@
 
 import uuid
 from collections.abc import Sequence
+from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -165,3 +167,99 @@ async def purchased(
         .limit(1)
     )
     return found
+
+
+# ---------------------------------------------------------------- statistics
+
+PAID = ("paid", "partially_refunded")
+SOLD = ("new", "confirmed", "shipped", "delivered")  # not cancelled or returned
+
+
+async def best_sellers(
+    db: AsyncSession, since: datetime, limit: int, store_id: uuid.UUID | None = None
+) -> list[tuple[uuid.UUID, int]]:
+    units = func.sum(OrderItem.quantity)
+    stmt = (
+        select(OrderItem.product_id, units)
+        .join(SellerOrder, SellerOrder.id == OrderItem.seller_order_id)
+        .join(Order, Order.id == SellerOrder.order_id)
+        .where(
+            Order.payment_status.in_(PAID),
+            SellerOrder.status.in_(SOLD),
+            SellerOrder.created_at >= since,
+            OrderItem.product_id.is_not(None),
+        )
+    )
+    if store_id is not None:
+        stmt = stmt.where(SellerOrder.store_id == store_id)
+    rows = await db.execute(stmt.group_by(OrderItem.product_id).order_by(units.desc()).limit(limit))
+    return [(p, int(n)) for p, n in rows.all() if p is not None]
+
+
+async def store_sales(
+    db: AsyncSession, store_id: uuid.UUID, since: datetime, until: datetime
+) -> list[tuple[date, int, Decimal, Decimal]]:
+    """(day, orders, revenue, commission) of a store's paid, not cancelled seller orders."""
+    day = func.date_trunc("day", SellerOrder.created_at).label("day")
+    rows = await db.execute(
+        select(day, func.count(), func.sum(SellerOrder.subtotal), func.sum(SellerOrder.commission))
+        .join(Order, Order.id == SellerOrder.order_id)
+        .where(
+            SellerOrder.store_id == store_id,
+            Order.payment_status.in_(PAID),
+            SellerOrder.status.in_(SOLD),
+            SellerOrder.created_at >= since,
+            SellerOrder.created_at < until,
+        )
+        .group_by(day)
+        .order_by(day)
+    )
+    return [(d.date(), int(n), Decimal(r or 0), Decimal(c or 0)) for d, n, r, c in rows.all()]
+
+
+async def store_order_counts(
+    db: AsyncSession, store_id: uuid.UUID, since: datetime, until: datetime
+) -> dict[str, int]:
+    rows = await db.execute(
+        select(SellerOrder.status, func.count())
+        .where(
+            SellerOrder.store_id == store_id,
+            SellerOrder.created_at >= since,
+            SellerOrder.created_at < until,
+        )
+        .group_by(SellerOrder.status)
+    )
+    return {s: int(n) for s, n in rows.all()}
+
+
+async def product_sales(
+    db: AsyncSession, store_id: uuid.UUID, since: datetime, until: datetime
+) -> dict[uuid.UUID, tuple[int, Decimal]]:
+    rows = await db.execute(
+        select(OrderItem.product_id, func.sum(OrderItem.quantity), func.sum(OrderItem.line_total))
+        .join(SellerOrder, SellerOrder.id == OrderItem.seller_order_id)
+        .join(Order, Order.id == SellerOrder.order_id)
+        .where(
+            SellerOrder.store_id == store_id,
+            Order.payment_status.in_(PAID),
+            SellerOrder.status.in_(SOLD),
+            SellerOrder.created_at >= since,
+            SellerOrder.created_at < until,
+            OrderItem.product_id.is_not(None),
+        )
+        .group_by(OrderItem.product_id)
+    )
+    return {p: (int(u), Decimal(r)) for p, u, r in rows.all() if p is not None}
+
+
+async def bought_by_user(db: AsyncSession, user_id: uuid.UUID, limit: int) -> list[uuid.UUID]:
+    rows = await db.scalars(
+        select(OrderItem.product_id)
+        .join(SellerOrder, SellerOrder.id == OrderItem.seller_order_id)
+        .join(Order, Order.id == SellerOrder.order_id)
+        .where(Order.user_id == user_id, OrderItem.product_id.is_not(None))
+        .group_by(OrderItem.product_id)
+        .order_by(func.max(Order.created_at).desc())
+        .limit(limit)
+    )
+    return [p for p in rows.all() if p is not None]

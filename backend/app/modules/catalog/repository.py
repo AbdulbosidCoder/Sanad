@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.catalog.models import Brand, Category, Product, ProductImage, ProductVariant
 
-Sort = Literal["newest", "price_asc", "price_desc", "popular", "rating"]
+Sort = Literal["relevance", "newest", "price_asc", "price_desc", "popular", "rating"]
 
 
 @dataclass
@@ -25,6 +25,9 @@ class ProductFilter:
     in_stock: bool | None = None
     rating_min: Decimal | None = None
     sizes: Sequence[str] = field(default_factory=list)
+    # Full-text match from the search module: a subquery with columns product_id, rank.
+    match: Any = None
+    product_ids: Sequence[uuid.UUID] | None = None
 
 
 # ---------------------------------------------------------------- categories and brands
@@ -76,7 +79,11 @@ def _conditions(
         conds.append(Product.brand_id.in_(select(Brand.id).where(Brand.slug.in_(f.brand_slugs))))
     if f.store_id is not None:
         conds.append(Product.store_id == f.store_id)
-    if f.q:
+    if f.product_ids is not None:
+        conds.append(Product.id.in_(f.product_ids))
+    if f.match is not None:
+        conds.append(Product.id.in_(select(f.match.c.product_id)))
+    elif f.q:
         pattern = f"%{_escape_like(f.q)}%"
         conds.append(
             or_(
@@ -134,6 +141,7 @@ def cheapest_compare_at() -> Any:
 
 
 _ORDER: dict[str, tuple[Any, ...]] = {
+    "relevance": (),  # by match rank, see list_products
     "newest": (Product.published_at.desc().nulls_last(), Product.id.desc()),
     "price_asc": (Product.min_price.asc().nulls_last(), Product.id),
     "price_desc": (Product.min_price.desc().nulls_last(), Product.id),
@@ -150,13 +158,14 @@ async def list_products(
     offset: int,
     limit: int,
 ) -> Sequence[tuple[Product, str | None, Decimal | None]]:
-    stmt = (
-        select(Product, cover_url(), cheapest_compare_at())
-        .where(and_(*_conditions(visible, f)))
-        .order_by(*_ORDER[sort])
-        .offset(offset)
-        .limit(limit)
-    )
+    stmt = select(Product, cover_url(), cheapest_compare_at()).where(and_(*_conditions(visible, f)))
+    if sort == "relevance" and f.match is not None:
+        stmt = stmt.join(f.match, f.match.c.product_id == Product.id).order_by(
+            f.match.c.rank.desc(), Product.id.desc()
+        )
+    else:
+        stmt = stmt.order_by(*_ORDER["newest" if sort == "relevance" else sort])
+    stmt = stmt.offset(offset).limit(limit)
     return [(p, c, d) for p, c, d in (await db.execute(stmt)).all()]
 
 
@@ -315,3 +324,7 @@ async def variant_id_by_sku(db: AsyncSession, sku: str) -> uuid.UUID | None:
         select(ProductVariant.id).where(ProductVariant.sku == sku)
     )
     return found
+
+
+async def all_product_ids(db: AsyncSession) -> Sequence[uuid.UUID]:
+    return (await db.scalars(select(Product.id).where(Product.deleted_at.is_(None)))).all()

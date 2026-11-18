@@ -34,6 +34,7 @@ from app.modules import setup_all
 from app.modules.cart import service as cart
 from app.modules.catalog import service as catalog
 from app.modules.catalog.schemas import BrandIn, CategoryIn, ImageIn, Names, ProductIn, VariantIn
+from app.modules.engagement import service as engagement
 from app.modules.i18n import service as i18n
 from app.modules.identity import service as identity
 from app.modules.identity.schemas import AddressIn, RegisterIn
@@ -42,6 +43,7 @@ from app.modules.inventory.schemas import StockUpdate
 from app.modules.orders import service as orders
 from app.modules.orders.schemas import CheckoutIn, ReturnIn, StatusIn
 from app.modules.payments import service as payments
+from app.modules.search import service as search
 from app.modules.stores import service as stores
 from app.modules.stores.schemas import ApplicationIn
 from app.modules.stores.service import StoreAccess
@@ -549,6 +551,30 @@ async def _seed_translations(db: AsyncSession) -> None:
     print(f"translations: {len(ids)} products in uz and en")
 
 
+async def _seed_engagement(db: AsyncSession) -> None:
+    """Views and favourites, so "trending" and "for you" on the home page are not empty."""
+    ids = [product_id for _, product_id in await _demo_product_ids(db)]
+    buyers = [f"buyer{i}" for i in range(1, 5)]
+    views = 0
+    for b, login in enumerate(buyers):
+        user_id = await _uid(db, login)
+        who = _principal(user_id)
+        # Each buyer opens a different overlapping slice; the first products are the hottest.
+        for product_id in ids[: 3 + b] + ids[7 - b : 8]:
+            counted = await engagement.record_view(
+                db, who, product_id, engagement.viewer_key(who, None, None)
+            )
+            views += counted.counted
+        for product_id in ids[b : b + 2]:
+            await engagement.add_favorite(db, who, product_id)
+    print(f"engagement: {views} product views, {2 * len(buyers)} favourites")
+
+
+async def _has_engagement(db: AsyncSession) -> bool:
+    buyer = await identity.find_user_id(db, f"buyer1@{DOMAIN}")
+    return buyer is None or bool(await engagement.favorite_product_ids(db, buyer, 1))
+
+
 async def _has_orders(db: AsyncSession) -> bool:
     buyer = await identity.find_user_id(db, f"buyer1@{DOMAIN}")
     return buyer is not None and bool(await orders.list_orders(db, _principal(buyer), 0, 1))
@@ -571,6 +597,12 @@ async def run(if_empty: bool) -> int:
             changed = True
         if not await _has_translations(db):
             await _seed_translations(db)
+            changed = True
+        if await search.is_empty(db):
+            print(f"search index: {await search.reindex_all(db)} products")
+            changed = True
+        if not await _has_engagement(db):
+            await _seed_engagement(db)
             changed = True
     if not changed:
         print(f"demo data is already there ({MARKER} exists): nothing to do")
