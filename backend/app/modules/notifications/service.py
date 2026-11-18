@@ -44,6 +44,7 @@ from app.modules.orders.events import (
 from app.modules.payments.events import RefundCompleted
 from app.modules.stores import service as stores
 from app.modules.stores.events import SellerApplicationRejected, StoreApproved, StoreSuspended
+from app.modules.support.events import TicketReplied
 
 MODULE = "notifications"
 MAX_EMAIL_ATTEMPTS = 5
@@ -195,7 +196,18 @@ async def on_store_suspended(db: AsyncSession, e: StoreSuspended) -> None:
     )
 
 
+async def on_ticket_replied(db: AsyncSession, e: TicketReplied) -> None:
+    await notify(
+        db,
+        e.user_id,
+        "ticket_replied",
+        {"subject": f"{e.number}: {e.subject}"},
+        link=f"/support/{e.ticket_id}",
+    )
+
+
 def setup() -> None:
+    subscribe(TicketReplied, on_ticket_replied)
     subscribe(OrderPlaced, on_order_placed)
     subscribe(OrderPaid, on_order_paid)
     subscribe(OrderCancelled, on_order_cancelled)

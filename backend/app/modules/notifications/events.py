@@ -2,6 +2,6 @@
 
 Emits: nothing
 Listens to: OrderPlaced, OrderPaid, OrderCancelled, SellerOrderStatusChanged,
-    RefundCompleted, StockLow, StoreApproved, SellerApplicationRejected, StoreSuspended
-    (TicketReplied joins with the support module)
+    RefundCompleted, StockLow, StoreApproved, SellerApplicationRejected, StoreSuspended,
+    TicketReplied
 """

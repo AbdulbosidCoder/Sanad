@@ -28,6 +28,7 @@ from app.core.errors import AppError
 from app.core.events import publish
 from app.core.models import uuid7
 from app.core.text import slugify
+from app.modules.audit import service as audit
 from app.modules.identity import service as identity
 from app.modules.stores import repository as repo
 from app.modules.stores.events import (
@@ -259,6 +260,9 @@ async def approve(
     application.reviewed_by = reviewer.user_id
     application.reviewed_at = datetime.now(UTC)
     await publish(db, StoreApproved(store.id, application.user_id, store.name))
+    await audit.record(
+        db, reviewer.user_id, "stores.approve", "seller_application", app_id, {"store_id": store.id}
+    )
     await db.commit()
     _log(
         "seller application approved",
@@ -282,6 +286,9 @@ async def reject(
         SellerApplicationRejected(
             application.id, application.user_id, application.store_name, note
         ),
+    )
+    await audit.record(
+        db, reviewer.user_id, "stores.reject", "seller_application", app_id, {"note": note}
     )
     await db.commit()
     _log("seller application rejected", application_id=app_id, reviewer=reviewer.user_id)
@@ -341,6 +348,7 @@ async def suspend(db: AsyncSession, actor: Principal, store_id: uuid.UUID, reaso
     store.status = "suspended"
     store.suspended_reason = reason
     await publish(db, StoreSuspended(store.id, store.name, reason))
+    await audit.record(db, actor.user_id, "stores.suspend", "store", store_id, {"reason": reason})
     await db.commit()
     _log("store suspended", store_id=store_id, actor=actor.user_id)
     return StoreOut.model_validate(store)
@@ -350,6 +358,7 @@ async def reactivate(db: AsyncSession, actor: Principal, store_id: uuid.UUID) ->
     store = await _store(db, store_id)
     store.status = "active"
     store.suspended_reason = None
+    await audit.record(db, actor.user_id, "stores.reactivate", "store", store_id)
     await db.commit()
     _log("store reactivated", store_id=store_id, actor=actor.user_id)
     return StoreOut.model_validate(store)

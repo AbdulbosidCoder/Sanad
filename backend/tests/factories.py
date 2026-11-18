@@ -12,9 +12,9 @@ from httpx import AsyncClient
 
 from app.core.db import get_sessionmaker
 from app.modules.identity import service as identity
-from app.modules.identity.tests.helpers import API, Login, register
+from app.modules.identity.tests.helpers import API, PASSWORD, Login, register
 
-__all__ = ["API", "Login"]
+__all__ = ["API", "PASSWORD", "Login"]
 
 
 Json = dict[str, Any]

@@ -1,38 +1,35 @@
 # Модуль `audit`
 
-Неизменяемый журнал чувствительных действий.
+Неизменяемый журнал чувствительных действий: кто, что, над чем и когда.
 
 ## Связи
 
-**Зависит от (вызывает их `service.py`):**
-- —
+Ни от кого не зависит. Его `service.record(...)` вызывают другие модули **в своей транзакции**:
+действие и запись журнала сохраняются вместе или вместе откатываются.
 
-**Используется модулями:**
-- `stores`
-- `catalog`
-- `payments`
-- `orders`
+**Таблица:** `audit_logs`
 
-**Публикует события:**
-- —
+## Что записывается
 
-**Слушает события:**
-- —
-
-**Таблицы:** `audit_logs`
-
-## Файлы
-
-| Файл | Что внутри |
+| action | Где |
 |---|---|
-| `module.py` | Описание модуля и его связей (видно в `GET /api/v1/system/modules`) |
-| `api.py` | HTTP-эндпоинты: принимают запрос, проверяют права, вызывают `service.py` |
-| `service.py` | Бизнес-логика. Единственная точка входа для других модулей |
-| `events.py` | События, которые модуль публикует и на которые подписан |
-| `models.py`, `repository.py`, `schemas.py` | Появятся вместе с функциональностью |
+| `users.block`, `users.unblock`, `rbac.grant`, `rbac.revoke` | identity (админка пользователей) |
+| `stores.approve`, `stores.reject`, `stores.suspend`, `stores.reactivate` | stores |
+| `orders.status_override`, `returns.decide` | orders |
+| `refunds.approve`, `refunds.reject` | payments |
+| `reviews.hide`, `reviews.unhide` | reviews |
+| `support.assign` | support |
 
-## Где искать баг
+## Защита от подделки
 
-Симптомы, которые обычно ведут сюда: действие сотрудника не попало в журнал.
+- Триггер в БД запрещает `UPDATE` и `DELETE` (ошибка `audit_logs is append-only`).
+- Каждая запись хранит хеш предыдущей (`prev_hash`) и свой (`hash` = SHA-256 от prev + содержимого).
+  Запись пишется под `pg_advisory_xact_lock`, поэтому цепочка всегда одна.
+- `GET /admin/audit/verify` пересчитывает цепочку и называет `seq`, где она порвалась.
 
-В ошибке API и в логах ищите `"module": "audit"` и `request_id`.
+## API
+
+| Метод | Путь | Кто | Что |
+|---|---|---|---|
+| GET | `/admin/audit?actor_id=&action=&target_type=&target_id=&since=` | `audit.read` — всё; `audit.read_finance` — только payments/refunds/returns/orders | Журнал, новые сверху |
+| GET | `/admin/audit/verify` | `audit.read` | Проверка цепочки |

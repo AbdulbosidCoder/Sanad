@@ -21,6 +21,7 @@ from app.core.errors import AppError
 from app.core.events import publish
 from app.core.models import uuid7
 from app.core.pagination import Page, next_cursor
+from app.modules.audit import service as audit
 from app.modules.catalog import service as catalog
 from app.modules.identity import service as identity
 from app.modules.orders import service as orders
@@ -255,6 +256,14 @@ async def set_hidden(
         raise _error("NOT_FOUND", "Review not found", 404)
     review.status = "hidden" if hide else "published"
     review.hidden_reason = hide.reason if hide else None
+    await audit.record(
+        db,
+        actor.user_id,
+        "reviews.hide" if hide else "reviews.unhide",
+        "review",
+        review.id,
+        {"reason": hide.reason if hide else None},
+    )
     await db.flush()
     await _refresh_rating(db, review.product_id)
     await db.commit()

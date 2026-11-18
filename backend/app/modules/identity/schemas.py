@@ -154,3 +154,27 @@ class AddressOut(_Out):
     is_default: bool
     created_at: datetime
     updated_at: datetime
+
+
+class AdminUserOut(_Out):
+    id: uuid.UUID
+    email: str | None
+    phone: str | None
+    full_name: str
+    locale: str
+    status: str
+    email_verified: bool
+    last_login_at: datetime | None
+    created_at: datetime
+    roles: list[str] = []
+
+
+class BlockIn(_In):
+    reason: str = Field(min_length=3, max_length=300)
+
+
+class RoleOut(BaseModel):
+    code: str
+    scope: str
+    description: str
+    permissions: list[str]

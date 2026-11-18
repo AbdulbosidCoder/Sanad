@@ -246,3 +246,48 @@ async def clear_default_address(db: AsyncSession, user_id: uuid.UUID) -> None:
         .values(is_default=False)
         .execution_options(synchronize_session="fetch")
     )
+
+
+# ---------------------------------------------------------------- admin
+
+
+async def search_users(
+    db: AsyncSession, q: str | None, status: str | None, role: str | None, offset: int, limit: int
+) -> Sequence[User]:
+    stmt = select(User).where(User.deleted_at.is_(None))
+    if q:
+        pattern = f"%{q.replace('%', '').replace('_', '')}%"
+        stmt = stmt.where(
+            (User.email.ilike(pattern))
+            | (User.phone.ilike(pattern))
+            | (User.full_name.ilike(pattern))
+        )
+    if status:
+        stmt = stmt.where(User.status == status)
+    if role:
+        stmt = stmt.where(
+            User.id.in_(
+                select(UserRole.user_id)
+                .join(Role, Role.id == UserRole.role_id)
+                .where(Role.code == role)
+            )
+        )
+    return (
+        await db.scalars(stmt.order_by(User.created_at.desc()).offset(offset).limit(limit))
+    ).all()
+
+
+async def remove_user_role(db: AsyncSession, user_id: uuid.UUID, role_id: uuid.UUID) -> int:
+    result = await db.execute(
+        delete(UserRole).where(UserRole.user_id == user_id, UserRole.role_id == role_id)
+    )
+    return int(result.rowcount or 0)  # type: ignore[attr-defined]
+
+
+async def count_role_holders(db: AsyncSession, role_id: uuid.UUID) -> int:
+    n = await db.scalar(select(func.count()).where(UserRole.role_id == role_id))
+    return int(n or 0)
+
+
+async def all_roles(db: AsyncSession) -> Sequence[Role]:
+    return (await db.scalars(select(Role).order_by(Role.scope, Role.code))).all()

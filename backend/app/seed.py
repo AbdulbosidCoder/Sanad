@@ -37,6 +37,7 @@ from app.modules.catalog.schemas import BrandIn, CategoryIn, ImageIn, Names, Pro
 from app.modules.engagement import service as engagement
 from app.modules.i18n import service as i18n
 from app.modules.identity import service as identity
+from app.modules.identity.rbac import ROLES_BY_CODE
 from app.modules.identity.schemas import AddressIn, RegisterIn
 from app.modules.inventory import service as inventory
 from app.modules.inventory.schemas import StockUpdate
@@ -49,6 +50,8 @@ from app.modules.search import service as search
 from app.modules.stores import service as stores
 from app.modules.stores.schemas import ApplicationIn
 from app.modules.stores.service import StoreAccess
+from app.modules.support import service as support
+from app.modules.support.schemas import StaffMessageIn, TicketIn
 
 PASSWORD = "Demo12345!"  # noqa: S105 - shared demo password, dev/test only
 DOMAIN = "example.com"  # reserved for examples: mail to it never reaches anyone
@@ -610,6 +613,46 @@ async def _has_reviews(db: AsyncSession) -> bool:
     return buyer is None or bool(await reviews.my_reviews(db, _principal(buyer)))
 
 
+async def _seed_support(db: AsyncSession) -> None:
+    """Two tickets: one answered by support, one waiting in the queue."""
+    buyer1 = _principal(await _uid(db, "buyer1"))
+    lead = _principal(await _uid(db, "support"))
+    role = ROLES_BY_CODE["support_lead"]
+    lead = Principal(lead.user_id, lead.session_id, frozenset({role.code}), role.permissions)
+    first = (await orders.list_orders(db, buyer1, 0, 1))[0]
+    ticket = await support.create_ticket(
+        db,
+        buyer1,
+        TicketIn(
+            subject="Когда приедет вторая часть заказа?",
+            category="order",
+            message="Одна посылка пришла, вторая ещё в пути. Подскажите сроки.",
+            order_id=first.id,
+        ),
+    )
+    await support.staff_reply(
+        db, lead, ticket.id, StaffMessageIn(body="Проверяю у магазина", internal=True)
+    )
+    await support.staff_reply(
+        db,
+        lead,
+        ticket.id,
+        StaffMessageIn(body="Посылка у курьера, привезут завтра до 18:00."),
+    )
+    buyer2 = _principal(await _uid(db, "buyer2"))
+    await support.create_ticket(
+        db,
+        buyer2,
+        TicketIn(subject="Не могу сменить телефон", category="account", message="Пишет ошибку"),
+    )
+    print("support: 2 tickets (one answered, one in the queue)")
+
+
+async def _has_support(db: AsyncSession) -> bool:
+    buyer = await identity.find_user_id(db, f"buyer1@{DOMAIN}")
+    return buyer is None or bool(await support.my_tickets(db, _principal(buyer), 0, 1))
+
+
 async def _has_orders(db: AsyncSession) -> bool:
     buyer = await identity.find_user_id(db, f"buyer1@{DOMAIN}")
     return buyer is not None and bool(await orders.list_orders(db, _principal(buyer), 0, 1))
@@ -638,6 +681,9 @@ async def run(if_empty: bool) -> int:
             changed = True
         if not await _has_reviews(db):
             await _seed_reviews(db)
+            changed = True
+        if not await _has_support(db):
+            await _seed_support(db)
             changed = True
         if not await _has_engagement(db):
             await _seed_engagement(db)

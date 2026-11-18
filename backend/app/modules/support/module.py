@@ -5,9 +5,9 @@ from app.modules.support.api import router
 
 MODULE = ModuleInfo(
     name="support",
-    summary="Тикеты поддержки и переписка.",
+    summary="Тикеты поддержки: переписка, внутренние заметки, очередь, назначение.",
     router=router,
-    depends_on=("identity", "orders"),
+    depends_on=("identity", "orders", "audit"),
     emits=("TicketCreated", "TicketReplied"),
     listens_to=(),
     tables=("support_tickets", "support_messages"),

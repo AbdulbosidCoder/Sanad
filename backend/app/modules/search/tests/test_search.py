@@ -63,7 +63,9 @@ async def test_history_suggest_and_popular(client, shop):
     history = (await client.get(f"{API}/me/search-history", headers=buyer.auth)).json()
     assert history[0]["query"] == "quellmo"
 
-    r = await client.get(f"{API}/search/suggest", params={"q": "quel"}, headers=buyer.auth)
+    r = await client.get(
+        f"{API}/search/suggest", params={"q": "quel", "lang": "ru"}, headers=buyer.auth
+    )
     kinds = {(i["kind"], i["text"]) for i in r.json()["items"]}
     assert ("history", "quellmo") in kinds
     assert ("product", "Quellmo Classic") in kinds

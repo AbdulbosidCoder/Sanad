@@ -20,6 +20,7 @@ MODULE = ModuleInfo(
         "StoreApproved",
         "SellerApplicationRejected",
         "StoreSuspended",
+        "TicketReplied",
     ),
     tables=("notifications", "notification_preferences", "email_outbox"),
     setup=service.setup,

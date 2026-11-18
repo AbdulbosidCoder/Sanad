@@ -22,6 +22,7 @@ from app.core.auth import Principal
 from app.core.errors import AppError
 from app.core.events import publish
 from app.core.models import uuid7
+from app.modules.audit import service as audit
 from app.modules.payments import repository as repo
 from app.modules.payments.events import PaymentFailed, PaymentSucceeded, RefundCompleted
 from app.modules.payments.models import LedgerEntry, Payment, PaymentAttempt, Refund
@@ -391,6 +392,14 @@ async def approve_refund(db: AsyncSession, approver: Principal, refund_id: uuid.
     if refund.requested_by == approver.user_id:
         raise _error("SAME_PERSON", "Whoever requested a refund cannot approve it", 403)
     await _execute(db, refund, approver.user_id)
+    await audit.record(
+        db,
+        approver.user_id,
+        "refunds.approve",
+        "refund",
+        refund.id,
+        {"amount": refund.amount, "status": refund.status, "payment_id": refund.payment_id},
+    )
     await db.commit()
     return RefundOut.model_validate(refund)
 
@@ -403,6 +412,9 @@ async def reject_refund(db: AsyncSession, approver: Principal, refund_id: uuid.U
         raise _error("REFUND_DECIDED", f"The refund is already {refund.status}", 409)
     refund.status = "rejected"
     refund.approved_by = approver.user_id
+    await audit.record(
+        db, approver.user_id, "refunds.reject", "refund", refund.id, {"amount": refund.amount}
+    )
     await db.commit()
     return RefundOut.model_validate(refund)
 

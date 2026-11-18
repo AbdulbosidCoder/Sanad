@@ -29,6 +29,7 @@ from app.core.db import get_sessionmaker
 from app.core.errors import AppError
 from app.core.events import publish, subscribe
 from app.core.models import uuid7
+from app.modules.audit import service as audit
 from app.modules.cart import service as cart
 from app.modules.identity import service as identity
 from app.modules.inventory import service as inventory
@@ -593,7 +594,16 @@ async def staff_set_status(
         raise _not_found()
     if part.status in ("cancelled", "returned"):
         raise _error("FINAL_STATUS", f"The order is already {part.status}", 409)
+    before = part.status
     await _change_status(db, part, data, principal.user_id, override=True)
+    await audit.record(
+        db,
+        principal.user_id,
+        "orders.status_override",
+        "seller_order",
+        part.id,
+        {"from": before, "to": part.status, "number": part.number},
+    )
     await db.commit()
     _log(
         "seller order status override",
@@ -698,6 +708,14 @@ async def decide_return(
         )
         request.status = "received"
         request.refund_id = refund.id
+    await audit.record(
+        db,
+        access.user_id,
+        "returns.decide",
+        "return_request",
+        request.id,
+        {"action": data.action, "status": request.status, "store_id": access.store_id},
+    )
     await db.commit()
     _log("return decided", return_id=request.id, action=data.action)
     return ReturnOut.model_validate(request)
@@ -753,3 +771,9 @@ async def product_sales(
 
 async def bought_by_user(db: AsyncSession, user_id: uuid.UUID, limit: int = 20) -> list[uuid.UUID]:
     return await repo.bought_by_user(db, user_id, limit)
+
+
+async def order_ref(db: AsyncSession, order_id: uuid.UUID) -> tuple[uuid.UUID, str] | None:
+    """(buyer user_id, number) of an order — support links tickets to orders."""
+    order = await repo.get_order(db, order_id)
+    return (order.user_id, order.number) if order else None
