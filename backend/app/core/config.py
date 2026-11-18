@@ -32,6 +32,16 @@ class Settings(BaseSettings):
     # --- Translations (i18n module) ---
     # "none": product texts wait untranslated (buyers see the original);
     # "claude": machine translation through the Claude API (needs ANTHROPIC_API_KEY).
+    # Outgoing e-mail: console = written to the log (dev); smtp = a real mail server.
+    email_backend: Literal["console", "smtp"] = "console"
+    email_from: str = "Sanad <no-reply@sanad.local>"
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_starttls: bool = True
+    public_web_url: str = "http://localhost:3000"
+
     translator: Literal["none", "claude"] = "none"
     anthropic_api_key: str = ""
     translation_model: str = "claude-haiku-5-5"

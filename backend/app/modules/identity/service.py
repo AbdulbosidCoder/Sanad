@@ -218,6 +218,32 @@ async def user_brief(db: AsyncSession, user_id: uuid.UUID) -> tuple[str | None, 
     return (user.email, user.full_name) if user else None
 
 
+@dataclass(frozen=True)
+class Contact:
+    """How to reach a user: for notifications."""
+
+    user_id: uuid.UUID
+    email: str | None
+    full_name: str
+    locale: str
+    email_verified: bool
+    active: bool
+
+
+async def contact(db: AsyncSession, user_id: uuid.UUID) -> Contact | None:
+    user = await repo.get_user(db, user_id)
+    if user is None:
+        return None
+    return Contact(
+        user.id,
+        user.email,
+        user.full_name,
+        user.locale,
+        user.email_verified,
+        user.status == "active" and user.deleted_at is None,
+    )
+
+
 async def _find_by_login(db: AsyncSession, login: str) -> User | None:
     if "@" in login:
         return await repo.find_user_by_email(db, login)

@@ -1,21 +1,26 @@
 """Self-description of the `notifications` module (see app/core/modules.py)."""
 
 from app.core.modules import ModuleInfo
+from app.modules.notifications import service
 from app.modules.notifications.api import router
 
 MODULE = ModuleInfo(
     name="notifications",
-    summary="Уведомления: in-app, email, позже SMS и push.",
+    summary="Уведомления: в приложении (колокольчик) и email; позже SMS и push.",
     router=router,
-    depends_on=("identity",),
+    depends_on=("identity", "stores"),
     emits=(),
     listens_to=(
         "OrderPlaced",
-        "PaymentSucceeded",
+        "OrderPaid",
+        "OrderCancelled",
         "SellerOrderStatusChanged",
+        "RefundCompleted",
         "StockLow",
-        "TicketReplied",
         "StoreApproved",
+        "SellerApplicationRejected",
+        "StoreSuspended",
     ),
-    tables=("notifications", "notification_preferences"),
+    tables=("notifications", "notification_preferences", "email_outbox"),
+    setup=service.setup,
 )

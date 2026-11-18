@@ -346,7 +346,12 @@ async def _execute(db: AsyncSession, refund: Refund, approved_by: uuid.UUID | No
     await publish(
         db,
         RefundCompleted(
-            refund.id, payment.id, payment.order_id, refund.seller_order_id, refund.amount
+            refund.id,
+            payment.id,
+            payment.order_id,
+            refund.seller_order_id,
+            refund.amount,
+            payment.user_id,
         ),
     )
     _log("refund completed", refund_id=refund.id, amount=refund.amount)

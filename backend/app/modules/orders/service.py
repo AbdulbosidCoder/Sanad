@@ -268,7 +268,7 @@ async def checkout(
             description=f"Order {order.number}",
         )
         await cart.clear_user_cart(db, principal.user_id)
-        await publish(db, OrderPlaced(order.id, principal.user_id, tuple(groups)))
+        await publish(db, OrderPlaced(order.id, principal.user_id, tuple(groups), order.number))
         await db.commit()
     except IntegrityError as exc:  # the same key raced in from a parallel request
         await db.rollback()
@@ -321,7 +321,9 @@ async def on_payment_succeeded(db: AsyncSession, event: PaymentSucceeded) -> Non
     order.payment_status = "paid"
     await inventory.commit_reservations(db, order.id)
     parts = await repo.seller_orders_of(db, order.id)
-    await publish(db, OrderPaid(order.id, order.user_id, tuple(s.store_id for s in parts)))
+    await publish(
+        db, OrderPaid(order.id, order.user_id, tuple(s.store_id for s in parts), order.number)
+    )
 
 
 async def _cancel_unpaid(db: AsyncSession, order: Order, reason: str, back_to_cart: bool) -> None:
@@ -339,7 +341,7 @@ async def _cancel_unpaid(db: AsyncSession, order: Order, reason: str, back_to_ca
         await cart.restore(
             db, order.user_id, [(i.variant_id, i.quantity) for i in items if i.variant_id]
         )
-    await publish(db, OrderCancelled(order.id, order.user_id, reason))
+    await publish(db, OrderCancelled(order.id, order.user_id, reason, order.number))
 
 
 async def on_payment_failed(db: AsyncSession, event: PaymentFailed) -> None:
@@ -434,7 +436,7 @@ async def cancel_order(
         order.status = "cancelled"
         order.cancel_reason = reason
         order.cancelled_at = _now()
-        await publish(db, OrderCancelled(order.id, order.user_id, reason))
+        await publish(db, OrderCancelled(order.id, order.user_id, reason, order.number))
     else:
         await _cancel_unpaid(db, order, reason, back_to_cart=False)
     await db.commit()

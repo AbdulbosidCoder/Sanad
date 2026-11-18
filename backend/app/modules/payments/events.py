@@ -29,3 +29,4 @@ class RefundCompleted:
     order_id: uuid.UUID
     seller_order_id: uuid.UUID | None
     amount: Decimal
+    user_id: uuid.UUID | None = None  # the buyer who gets the money back

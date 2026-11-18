@@ -25,10 +25,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import Principal, get_principal
 from app.core.db import get_session
 from app.core.errors import AppError
+from app.core.events import publish
 from app.core.models import uuid7
 from app.core.text import slugify
 from app.modules.identity import service as identity
 from app.modules.stores import repository as repo
+from app.modules.stores.events import (
+    SellerApplicationRejected,
+    SellerApplicationSubmitted,
+    StoreApproved,
+    StoreSuspended,
+)
 from app.modules.stores.models import SellerApplication, Store, StoreMembership
 from app.modules.stores.schemas import (
     ApplicationIn,
@@ -164,6 +171,10 @@ async def apply(db: AsyncSession, principal: Principal, data: ApplicationIn) -> 
     )
     db.add(application)
     try:
+        await db.flush()
+        await publish(
+            db, SellerApplicationSubmitted(application.id, principal.user_id, data.store_name)
+        )
         await db.commit()
     except IntegrityError as exc:
         await db.rollback()
@@ -247,6 +258,7 @@ async def approve(
     application.review_note = note
     application.reviewed_by = reviewer.user_id
     application.reviewed_at = datetime.now(UTC)
+    await publish(db, StoreApproved(store.id, application.user_id, store.name))
     await db.commit()
     _log(
         "seller application approved",
@@ -265,6 +277,12 @@ async def reject(
     application.review_note = note
     application.reviewed_by = reviewer.user_id
     application.reviewed_at = datetime.now(UTC)
+    await publish(
+        db,
+        SellerApplicationRejected(
+            application.id, application.user_id, application.store_name, note
+        ),
+    )
     await db.commit()
     _log("seller application rejected", application_id=app_id, reviewer=reviewer.user_id)
     return ApplicationOut.model_validate(application)
@@ -322,6 +340,7 @@ async def suspend(db: AsyncSession, actor: Principal, store_id: uuid.UUID, reaso
     store = await _store(db, store_id)
     store.status = "suspended"
     store.suspended_reason = reason
+    await publish(db, StoreSuspended(store.id, store.name, reason))
     await db.commit()
     _log("store suspended", store_id=store_id, actor=actor.user_id)
     return StoreOut.model_validate(store)
@@ -382,3 +401,14 @@ async def remove_staff(db: AsyncSession, access: StoreAccess, user_id: uuid.UUID
 async def commission_rate(db: AsyncSession, store_id: uuid.UUID) -> Decimal:
     """The store's current platform commission (a fraction: 0.1 = 10 %)."""
     return (await _store(db, store_id)).commission_rate
+
+
+async def staff_with_permission(
+    db: AsyncSession, store_id: uuid.UUID, permission: str
+) -> list[uuid.UUID]:
+    """Users of a store whose role grants ``permission`` (who to notify about what)."""
+    return [
+        m.user_id
+        for m in await repo.staff_of(db, store_id)
+        if permission in identity.store_role_permissions(m.role)
+    ]

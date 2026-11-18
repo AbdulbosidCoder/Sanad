@@ -17,10 +17,12 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import AppError
+from app.core.events import publish
 from app.core.models import uuid7
 from app.modules.catalog import service as catalog
 from app.modules.catalog.service import VariantBrief
 from app.modules.inventory import repository as repo
+from app.modules.inventory.events import StockLow
 from app.modules.inventory.models import Inventory, StockMovement, StockReservation
 from app.modules.inventory.schemas import MovementOut, StockOut, StockUpdate
 from app.modules.stores.service import StoreAccess
@@ -194,6 +196,7 @@ async def reserve(
 
 async def commit_reservations(db: AsyncSession, order_id: uuid.UUID) -> None:
     """Payment succeeded: the held stock leaves the shelf (movement ``sale``)."""
+    low: list[tuple[uuid.UUID, uuid.UUID, int, int]] = []
     for r in await repo.reservations_of(db, order_id):
         stock = await repo.lock_stock(db, r.variant_id)
         if stock is None:  # variant deleted meanwhile
@@ -215,7 +218,26 @@ async def commit_reservations(db: AsyncSession, order_id: uuid.UUID) -> None:
                 actor_id=None,
             )
         )
-        await catalog.set_variant_in_stock(db, r.variant_id, stock.on_hand - stock.reserved > 0)
+        free = stock.on_hand - stock.reserved
+        await catalog.set_variant_in_stock(db, r.variant_id, free > 0)
+        # Stock on the shelf just went down to the threshold: tell the store once.
+        if stock.on_hand <= stock.low_stock_threshold < stock.on_hand + r.quantity:
+            low.append((r.store_id, r.variant_id, free, stock.low_stock_threshold))
+    if low:
+        info = await catalog.variants_for_sale(db, [v for _, v, _, _ in low])
+        for store_id, variant_id, free, threshold in low:
+            v = info.get(variant_id)
+            await publish(
+                db,
+                StockLow(
+                    store_id,
+                    variant_id,
+                    v.sku if v else "",
+                    v.product_title if v else "",
+                    free,
+                    threshold,
+                ),
+            )
 
 
 async def release_reservations(db: AsyncSession, order_id: uuid.UUID) -> None:

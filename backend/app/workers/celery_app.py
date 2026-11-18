@@ -13,6 +13,7 @@ celery_app.conf.update(
     beat_schedule={
         "orders-expire-unpaid": {"task": "orders.expire_unpaid", "schedule": 300.0},
         "i18n-translate-pending": {"task": "i18n.translate_pending", "schedule": 60.0},
+        "notifications-send-emails": {"task": "notifications.send_emails", "schedule": 60.0},
     },
 )
 
@@ -45,3 +46,15 @@ def translate_pending() -> int:
 
     setup_all()
     return asyncio.run(translate_pending_job())
+
+
+@celery_app.task(name="notifications.send_emails")  # type: ignore[untyped-decorator]
+def send_emails() -> int:
+    """Sends queued e-mails (every minute)."""
+    import asyncio
+
+    from app.modules import setup_all
+    from app.modules.notifications.service import send_emails_job
+
+    setup_all()
+    return asyncio.run(send_emails_job())

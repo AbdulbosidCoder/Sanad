@@ -13,6 +13,7 @@ class OrderPlaced:
     order_id: uuid.UUID
     user_id: uuid.UUID
     store_ids: tuple[uuid.UUID, ...]
+    number: str = ""
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class OrderPaid:
     order_id: uuid.UUID
     user_id: uuid.UUID
     store_ids: tuple[uuid.UUID, ...]
+    number: str = ""
 
 
 @dataclass(frozen=True)
@@ -27,6 +29,7 @@ class OrderCancelled:
     order_id: uuid.UUID
     user_id: uuid.UUID
     reason: str
+    number: str = ""
 
 
 @dataclass(frozen=True)

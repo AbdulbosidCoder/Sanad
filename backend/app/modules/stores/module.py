@@ -8,7 +8,12 @@ MODULE = ModuleInfo(
     summary="Магазины, заявки продавцов, сотрудники магазина.",
     router=router,
     depends_on=("identity", "audit"),
-    emits=("SellerApplicationSubmitted", "StoreApproved", "StoreSuspended"),
+    emits=(
+        "SellerApplicationSubmitted",
+        "StoreApproved",
+        "SellerApplicationRejected",
+        "StoreSuspended",
+    ),
     listens_to=(),
     tables=("stores", "store_memberships", "seller_applications"),
 )
