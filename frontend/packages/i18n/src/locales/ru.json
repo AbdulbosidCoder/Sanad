@@ -33,5 +33,9 @@
   "error.copy": "Скопировать",
   "error.copied": "Скопировано",
   "error.retry": "Повторить",
-  "error.network": "Нет связи с сервером"
+  "error.network": "Нет связи с сервером",
+  "theme.toggle": "Тема",
+  "theme.system": "Как в системе",
+  "theme.light": "Дневная",
+  "theme.dark": "Ночная"
 }

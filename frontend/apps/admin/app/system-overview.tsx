@@ -58,7 +58,7 @@ export function SystemOverview({ locale }: { locale: Locale }) {
         <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3">
           {modules.map((m) => (
             <Card key={m.name} className="flex flex-col gap-2">
-              <span className="font-mono text-sm font-semibold text-forest-700">{m.name}</span>
+              <span className="font-mono text-sm font-semibold text-link">{m.name}</span>
               <p className="text-sm">{m.summary}</p>
               <Links label={t("admin.ops.dependsOn")} items={m.depends_on} />
               <Links label={t("admin.ops.emits")} items={m.emits} />

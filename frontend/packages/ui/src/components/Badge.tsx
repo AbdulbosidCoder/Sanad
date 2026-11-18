@@ -3,10 +3,10 @@ import type { ReactNode } from "react";
 import { cn } from "../cn";
 
 const tones = {
-  success: "bg-forest-100 text-forest-700",
-  warning: "bg-[#FDF0DC] text-warning",
-  danger: "bg-[#FDE7E5] text-danger",
-  neutral: "bg-bg text-ink-muted",
+  success: "bg-success-bg text-success-fg",
+  warning: "bg-warning-bg text-warning-fg",
+  danger: "bg-danger-bg text-danger-fg",
+  neutral: "bg-surface-2 text-ink-muted",
 } as const;
 
 export function Badge({ tone = "neutral", children }: { tone?: keyof typeof tones; children: ReactNode }) {

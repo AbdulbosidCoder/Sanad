@@ -39,10 +39,10 @@ export function ErrorNotice({
   }
 
   return (
-    <div role="alert" className="rounded-xl border border-[#F4C7C2] bg-[#FDF4F3] p-5 text-ink">
+    <div role="alert" className="rounded-xl border border-danger-line bg-danger-bg p-5 text-ink">
       <p className="font-display text-lg font-bold">{t(locale, "error.title")}</p>
       <p className="mt-1 text-sm text-ink-muted">{t(locale, "error.hint")}</p>
-      <pre className="mt-3 whitespace-pre-wrap rounded-md bg-surface p-3 font-mono text-[13px]">{report}</pre>
+      <pre className="mt-3 whitespace-pre-wrap rounded-md bg-surface p-3 font-mono text-[13px] text-ink">{report}</pre>
       <div className="mt-3 flex flex-wrap gap-2">
         <Button variant="secondary" onClick={copy}>
           {copied ? t(locale, "error.copied") : t(locale, "error.copy")}
