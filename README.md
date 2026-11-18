@@ -7,6 +7,7 @@
 ```bash
 make up        # создаёт .env из .env.example, собирает и запускает все сервисы
 make ps        # статус и health каждого контейнера
+make seed      # демо-данные (в dev грузятся и сами при `make up`)
 make test      # тесты бэкенда
 make help      # все команды
 ```
@@ -18,6 +19,22 @@ make help      # все команды
 - Состояние БД и Redis: http://localhost/health/ready
 - Карта модулей бэкенда (dev): http://localhost:8000/api/v1/system/modules
 - Письма в dev (mailpit): http://localhost:8025
+
+## Демо-данные
+
+В dev после миграций автоматически загружаются тестовые данные (повторный запуск ничего не дублирует): 10 пользователей, 5 заявок продавцов, 3 магазина, 10 категорий, 10 брендов, 10 товаров с размерами, фото с 7 сторон, фото покупателей и остатками (есть «мало на складе» и «нет в наличии»).
+
+Пароль у всех: `Demo12345!`
+
+| Вход | Роль |
+|---|---|
+| `admin@example.com` | super_admin |
+| `moderator@example.com` | admin |
+| `support@example.com` | support_lead |
+| `seller1@example.com`, `seller2@…`, `seller3@…` | владельцы магазинов Sneaker Lab, Urban Step, Outdoor Uz |
+| `buyer1@example.com` … `buyer4@example.com` | покупатели |
+
+Без Docker: укажите `DATABASE_URL` в `.env` в корне репозитория, затем `cd backend && alembic upgrade head && python -m app.seed`. В `staging`/`prod` команда отказывается работать.
 
 ## Документация
 

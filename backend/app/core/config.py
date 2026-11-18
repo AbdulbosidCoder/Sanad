@@ -8,7 +8,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # The repository-root .env is read too, so `cd backend && uvicorn ...` (or `python -m
+    # app.seed`) uses the same DATABASE_URL as the rest of the project. Real environment
+    # variables always win over both files.
+    model_config = SettingsConfigDict(env_file=("../.env", ".env"), extra="ignore")
 
     app_env: Literal["dev", "test", "staging", "prod"] = "dev"
     app_name: str = "Sanad API"

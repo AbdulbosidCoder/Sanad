@@ -40,8 +40,8 @@ from app.modules.identity.schemas import (
     PasswordChangeIn,
     RegisterIn,
     SessionOut,
-    normalize_phone,
 )
+from app.modules.identity.schemas import normalize_phone as normalize_phone  # public helper
 
 MODULE = "identity"
 MAX_ADDRESSES = 20
@@ -155,7 +155,8 @@ def _open_session(db: AsyncSession, user: User, client: ClientInfo) -> IssuedTok
 # ---------------------------------------------------------------- auth flows
 
 
-async def register(db: AsyncSession, data: RegisterIn, client: ClientInfo) -> IssuedTokens:
+async def _create_user(db: AsyncSession, data: RegisterIn) -> User:
+    """Inserts a customer with a password (flushed, not committed)."""
     if data.email and await repo.email_exists(db, data.email):
         raise _error("EMAIL_TAKEN", "This email is already registered", 409)
     if data.phone and await repo.phone_exists(db, data.phone):
@@ -171,7 +172,6 @@ async def register(db: AsyncSession, data: RegisterIn, client: ClientInfo) -> Is
         phone=data.phone,
         full_name=data.full_name,
         locale=data.locale,
-        last_login_at=_now(),
     )
     db.add(user)
     db.add(UserCredential(user_id=user.id, type="password", secret=password_hash))
@@ -181,10 +181,41 @@ async def register(db: AsyncSession, data: RegisterIn, client: ClientInfo) -> Is
         await db.rollback()
         raise _error("ACCOUNT_EXISTS", "This email or phone is already registered", 409) from exc
     await repo.add_user_role(db, user.id, role.id)
+    return user
+
+
+async def register(db: AsyncSession, data: RegisterIn, client: ClientInfo) -> IssuedTokens:
+    user = await _create_user(db, data)
+    user.last_login_at = _now()
     tokens = _open_session(db, user, client)
     await db.commit()
     _log("user registered", user_id=user.id)
     return tokens
+
+
+async def create_user(db: AsyncSession, data: RegisterIn) -> uuid.UUID:
+    """Creates a customer account without signing it in (demo data, admin tools).
+    The caller commits."""
+    user = await _create_user(db, data)
+    _log("user created", user_id=user.id)
+    return user.id
+
+
+def store_role_permissions(role_code: str) -> frozenset[str]:
+    """Permissions of a store-scope role (``seller_owner`` ...). Unknown role -> none."""
+    role = ROLES_BY_CODE.get(role_code)
+    if role is None or role.scope != "store":
+        return frozenset()
+    return role.permissions
+
+
+STORE_ROLES: tuple[str, ...] = tuple(r.code for r in ROLES if r.scope == "store")
+
+
+async def user_brief(db: AsyncSession, user_id: uuid.UUID) -> tuple[str | None, str] | None:
+    """(email, full_name) of a user, for staff lists. None if the user does not exist."""
+    user = await repo.get_user(db, user_id)
+    return (user.email, user.full_name) if user else None
 
 
 async def _find_by_login(db: AsyncSession, login: str) -> User | None:

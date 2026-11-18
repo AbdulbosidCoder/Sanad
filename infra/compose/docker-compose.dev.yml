@@ -14,6 +14,8 @@ services:
   migrate:
     build: {target: dev}
     volumes: ["../../backend:/app"]
+    # Dev only: after migrations, load demo data once (skipped if it is already there).
+    command: ["sh", "-c", "alembic upgrade head && python -m app.seed"]
   postgres:
     ports: ["5432:5432"]
     networks: [data, public]

@@ -48,6 +48,7 @@ flowchart TB
     identity --> stores
     media --> catalog
     stores --> catalog
+    stores --> inventory
     catalog --> i18n --> search
     catalog --> inventory --> cart --> orders
     payments --> orders
@@ -110,6 +111,7 @@ make logs s=api | grep 3f9c2a1b7e8d4c6f9a0b1c2d3e4f5a6b
 | Не входит, разлогинивает, 403 «нет доступа» | `identity` | Роли пользователя, срок токена |
 | Продавец не видит свою панель или магазин | `stores` | Членство в магазине, статус заявки |
 | Товар не сохраняется, неверная цена | `catalog` | Ошибка валидации (`VALIDATION_ERROR`, поле `errors`) |
+| Товар есть в панели продавца, но не виден на витрине | `catalog` | Статус товара (`active`?), не приостановлен ли магазин (`stores`) |
 | Нет перевода на uz/en | `i18n` | Контейнер `worker` жив? |
 | Товар не находится в поиске | `search` | `worker` (индексация), есть ли перевод |
 | «Нет в наличии», хотя товар есть | `inventory` | Резервы неоплаченных заказов |

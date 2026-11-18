@@ -5,10 +5,10 @@ from app.modules.inventory.api import router
 
 MODULE = ModuleInfo(
     name="inventory",
-    summary="Остатки, резервы под заказы, движение склада, low-stock.",
+    summary="Остатки, движение склада, low-stock (резервы под заказы — этап 5).",
     router=router,
-    depends_on=("catalog",),
+    depends_on=("catalog", "stores"),
     emits=("StockLow", "StockReserved"),
     listens_to=("OrderPlaced", "PaymentSucceeded", "OrderCancelled", "RefundCompleted"),
-    tables=("inventory", "stock_reservations", "stock_movements"),
+    tables=("inventory", "stock_movements"),
 )

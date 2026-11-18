@@ -1,40 +1,44 @@
 # Модуль `inventory`
 
-Остатки, резервы под заказы, движение склада, low-stock.
+Остатки по вариантам товара, пороги low-stock и журнал всех движений склада.
 
 ## Связи
 
 **Зависит от (вызывает их `service.py`):**
-- `catalog`
+- `catalog` — варианты товаров магазина; сообщает каталогу, есть ли вариант в наличии
+- `stores` — доступ продавца (`store_access`)
 
-**Используется модулями:**
-- `cart`
-- `orders`
+**Слушает события (этап 5):** `OrderPlaced`, `PaymentSucceeded`, `OrderCancelled`, `RefundCompleted`
 
-**Публикует события:**
-- `StockLow`
-- `StockReserved`
+**Таблицы:** `inventory`, `stock_movements` (`stock_reservations` — этап 5)
 
-**Слушает события:**
-- `OrderPlaced`
-- `PaymentSucceeded`
-- `OrderCancelled`
-- `RefundCompleted`
+## Эндпоинты
 
-**Таблицы:** `inventory`, `stock_reservations`, `stock_movements`
+| Метод | Путь | Кто | Что делает |
+|---|---|---|---|
+| GET | `/seller/inventory?low_stock=true` | сотрудник магазина | Остатки всех вариантов; с `low_stock` — только где `available <= порог`, самые пустые сверху |
+| PATCH | `/seller/inventory/{variant_id}` | `inventory.write` | `on_hand` (задать) **или** `delta` (+10 пришло, −2 брак), `low_stock_threshold`, `note` |
+| GET | `/seller/inventory/{variant_id}/movements` | сотрудник магазина | История изменений, новые сверху |
+
+## Правила
+
+- `available = on_hand - reserved`. `reserved` — товар, отложенный под неоплаченные заказы (этап 5); ниже него остаток опустить нельзя (`INVENTORY.BELOW_RESERVED`).
+- Вариант без строки в `inventory` считается с остатком 0; строка появляется при первом изменении.
+- Строка блокируется на время изменения (`SELECT ... FOR UPDATE`), каждое изменение пишется в `stock_movements` с автором и причиной (`manual`, `seed`, позже `sale`, `return`, `cancel`).
 
 ## Файлы
 
 | Файл | Что внутри |
 |---|---|
-| `module.py` | Описание модуля и его связей (видно в `GET /api/v1/system/modules`) |
-| `api.py` | HTTP-эндпоинты: принимают запрос, проверяют права, вызывают `service.py` |
-| `service.py` | Бизнес-логика. Единственная точка входа для других модулей |
-| `events.py` | События, которые модуль публикует и на которые подписан |
-| `models.py`, `repository.py`, `schemas.py` | Появятся вместе с функциональностью |
+| `module.py` | Описание модуля и его связей |
+| `api.py` | HTTP-эндпоинты |
+| `service.py` | Бизнес-логика; `set_stock` для других модулей и демо-данных |
+| `repository.py` | Запросы к БД |
+| `models.py` | Таблицы |
+| `schemas.py` | Тела запросов/ответов |
 
 ## Где искать баг
 
-Симптомы, которые обычно ведут сюда: неверный остаток, «нет в наличии», хотя товар есть, остаток ушёл в минус.
+Симптомы: неверный остаток, товар «нет в наличии», хотя он есть, не работает low-stock.
 
-В ошибке API и в логах ищите `"module": "inventory"` и `request_id`.
+В ошибке API и в логах ищите `"module": "inventory"`. Откуда взялось число — смотрите `GET /seller/inventory/{variant_id}/movements`.

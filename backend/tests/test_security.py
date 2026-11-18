@@ -45,7 +45,11 @@ def test_access_token_roundtrip():
 def test_tampered_access_token_is_rejected():
     token, _ = create_access_token(uuid7(), uuid7())
     header, payload, signature = token.split(".")
-    forged = f"{header}.{payload}.{signature[:-2]}AA"
+    # Change a character in the middle: the last ones carry padding bits and may not
+    # change the decoded bytes, which made this test fail about once in 256 runs.
+    middle = len(signature) // 2
+    swapped = "B" if signature[middle] == "A" else "A"
+    forged = f"{header}.{payload}.{signature[:middle]}{swapped}{signature[middle + 1 :]}"
     with pytest.raises(InvalidAccessToken):
         decode_access_token(forged)
 
