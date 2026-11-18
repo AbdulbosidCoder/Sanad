@@ -756,3 +756,54 @@ async def set_variant_in_stock(db: AsyncSession, variant_id: uuid.UUID, in_stock
     product = await db.get(Product, variant.product_id)
     if product is not None:
         await refresh_summary(db, product)
+
+
+# ---------------------------------------------------------------- for cart and orders
+
+
+@dataclass(frozen=True)
+class VariantForSale:
+    """What a buyer needs to know about a variant to put it in a cart or an order."""
+
+    variant_id: uuid.UUID
+    product_id: uuid.UUID
+    product_slug: str
+    product_title: str
+    store_id: uuid.UUID
+    sku: str
+    attributes: dict[str, str]
+    price: Decimal
+    compare_at_price: Decimal | None
+    currency: str
+    cover_url: str | None
+    sellable: bool  # product visible to buyers and the variant active
+
+
+async def variants_for_sale(
+    db: AsyncSession, variant_ids: Sequence[uuid.UUID]
+) -> dict[uuid.UUID, VariantForSale]:
+    if not variant_ids:
+        return {}
+    active_stores = set(await db.scalars(stores.active_store_ids()))
+    out: dict[uuid.UUID, VariantForSale] = {}
+    for v, p, cover in await repo.variants_with_products(db, variant_ids):
+        visible = p.status == "active" and p.deleted_at is None and p.store_id in active_stores
+        out[v.id] = VariantForSale(
+            variant_id=v.id,
+            product_id=p.id,
+            product_slug=p.slug,
+            product_title=p.title,
+            store_id=p.store_id,
+            sku=v.sku,
+            attributes=v.attributes,
+            price=v.price,
+            compare_at_price=v.compare_at_price,
+            currency=p.currency,
+            cover_url=cover,
+            sellable=visible and v.is_active,
+        )
+    return out
+
+
+async def find_variant_id(db: AsyncSession, sku: str) -> uuid.UUID | None:
+    return await repo.variant_id_by_sku(db, sku)

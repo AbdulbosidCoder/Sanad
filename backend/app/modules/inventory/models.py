@@ -62,3 +62,34 @@ class StockMovement(UUIDPrimaryKey, Base):
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL")
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+RESERVATION_STATUSES = ("active", "committed", "released")
+
+
+class StockReservation(UUIDPrimaryKey, Timestamps, Base):
+    """Stock held for an unpaid order. Paid -> ``committed`` (stock leaves the shelf);
+    payment failed, order cancelled or time ran out -> ``released``."""
+
+    __tablename__ = "stock_reservations"
+    __mapper_args__ = {"eager_defaults": True}  # noqa: RUF012
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="quantity"),
+        CheckConstraint(
+            f"status IN ({', '.join(repr(s) for s in RESERVATION_STATUSES)})", name="status"
+        ),
+        Index("ix_stock_reservations_order", "order_id"),
+        Index("ix_stock_reservations_active_expiry", "status", "expires_at"),
+    )
+
+    variant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("product_variants.id", ondelete="CASCADE")
+    )
+    store_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("stores.id", ondelete="CASCADE")
+    )
+    # The parent order; no foreign key, so inventory does not depend on the orders tables.
+    order_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True))
+    quantity: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(10), default="active", server_default="active")
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

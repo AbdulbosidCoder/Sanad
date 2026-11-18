@@ -22,3 +22,14 @@ async def test_demo_data_can_be_loaded_twice_and_is_usable(client):
     assert len(products) == 4
     page = (await client.get(f"{API}/products/{products[0]['slug']}")).json()
     assert page["photo_coverage"]["complete"] is True
+
+
+async def test_demo_orders_cover_every_state(client):
+    assert await run(if_empty=True) == 0
+    r = await login(client, "buyer1@example.com", PASSWORD)
+    buyer = {"Authorization": f"Bearer {r.json()['access_token']}"}
+    mine = (await client.get(f"{API}/orders", headers=buyer)).json()
+    assert {(o["status"], o["payment_status"]) for o in mine} == {
+        ("partially_fulfilled", "paid"),
+        ("cancelled", "failed"),
+    }

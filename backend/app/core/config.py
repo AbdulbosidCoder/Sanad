@@ -24,6 +24,10 @@ class Settings(BaseSettings):
 
     # Payments: the fake provider must never be enabled in production.
     fake_payments_enabled: bool = True
+    # HMAC key the fake provider signs its webhooks with (dev/test only).
+    fake_payments_webhook_secret: str = "dev-fake-webhook-secret"  # noqa: S105
+    # How long stock stays held for an unpaid order.
+    reservation_ttl_minutes: int = 30
 
     # --- Auth (ADR 0005) ---
     # Ed25519 private key seed, base64url, 32 bytes. Generate one with:
@@ -48,6 +52,8 @@ class Settings(BaseSettings):
     def _prod_requires_secrets(self) -> "Settings":
         if self.app_env in ("staging", "prod") and not self.jwt_signing_key:
             raise ValueError("JWT_SIGNING_KEY must be set outside dev/test")
+        if self.app_env == "prod" and self.fake_payments_enabled:
+            raise ValueError("FAKE_PAYMENTS_ENABLED must be false in production")
         return self
 
 

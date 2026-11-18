@@ -14,6 +14,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 from fastapi import Depends, Header
@@ -376,3 +377,8 @@ async def remove_staff(db: AsyncSession, access: StoreAccess, user_id: uuid.UUID
     await db.delete(membership)
     await db.commit()
     _log("store staff removed", store_id=access.store_id, user_id=user_id)
+
+
+async def commission_rate(db: AsyncSession, store_id: uuid.UUID) -> Decimal:
+    """The store's current platform commission (a fraction: 0.1 = 10 %)."""
+    return (await _store(db, store_id)).commission_rate

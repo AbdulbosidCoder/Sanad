@@ -134,3 +134,31 @@ async def published_product(
     assert r.status_code == 200, r.text
     published: Json = r.json()
     return published
+
+
+async def stock(client: AsyncClient, shop: Shop, variant_id: str, on_hand: int) -> None:
+    r = await client.patch(
+        f"{API}/seller/inventory/{variant_id}", json={"on_hand": on_hand}, headers=shop.headers
+    )
+    assert r.status_code == 200, r.text
+
+
+async def buyer_with_address(client: AsyncClient) -> Login:
+    buyer, _ = await user_with_role(client)
+    r = await client.post(
+        f"{API}/me/addresses",
+        json={
+            "recipient_name": "Ali Valiyev",
+            "phone": "+998901234567",
+            "region": "Toshkent",
+            "city": "Toshkent",
+            "line1": "Amir Temur 1",
+        },
+        headers=buyer.auth,
+    )
+    assert r.status_code == 201, r.text
+    return buyer
+
+
+def key() -> dict[str, str]:
+    return {"Idempotency-Key": uuid.uuid4().hex}

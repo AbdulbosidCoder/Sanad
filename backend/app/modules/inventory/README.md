@@ -8,9 +8,9 @@
 - `catalog` — варианты товаров магазина; сообщает каталогу, есть ли вариант в наличии
 - `stores` — доступ продавца (`store_access`)
 
-**Слушает события (этап 5):** `OrderPlaced`, `PaymentSucceeded`, `OrderCancelled`, `RefundCompleted`
+**Используется модулями:** `orders` (резерв при checkout, списание после оплаты, снятие резерва, возврат на склад), `cart` (свободный остаток)
 
-**Таблицы:** `inventory`, `stock_movements` (`stock_reservations` — этап 5)
+**Таблицы:** `inventory`, `stock_reservations`, `stock_movements`
 
 ## Эндпоинты
 
@@ -22,7 +22,8 @@
 
 ## Правила
 
-- `available = on_hand - reserved`. `reserved` — товар, отложенный под неоплаченные заказы (этап 5); ниже него остаток опустить нельзя (`INVENTORY.BELOW_RESERVED`).
+- `available = on_hand - reserved`. `reserved` — товар, отложенный под неоплаченные заказы (`stock_reservations`, 30 минут); ниже него остаток опустить нельзя (`INVENTORY.BELOW_RESERVED`).
+- Резерв атомарный: `UPDATE ... SET reserved = reserved + q WHERE on_hand - reserved >= q`, поэтому два покупателя не купят последнюю пару одновременно. Оплата → `sale` (остаток уменьшается), неоплата/отмена → резерв снимается.
 - Вариант без строки в `inventory` считается с остатком 0; строка появляется при первом изменении.
 - Строка блокируется на время изменения (`SELECT ... FOR UPDATE`), каждое изменение пишется в `stock_movements` с автором и причиной (`manual`, `seed`, позже `sale`, `return`, `cancel`).
 

@@ -457,3 +457,27 @@ async def delete_address(db: AsyncSession, principal: Principal, address_id: uui
         if remaining:
             remaining[0].is_default = True
     await db.commit()
+
+
+async def address_snapshot(
+    db: AsyncSession, user_id: uuid.UUID, address_id: uuid.UUID | None
+) -> dict[str, str | None] | None:
+    """A copy of the user's address for an order: the given one, else the default one."""
+    addresses = [a for a in await repo.list_addresses(db, user_id)]
+    chosen = next(
+        (a for a in addresses if a.id == address_id)
+        if address_id is not None
+        else (a for a in addresses if a.is_default),
+        None,
+    )
+    if chosen is None:
+        return None
+    return {
+        "id": str(chosen.id),
+        "recipient_name": chosen.recipient_name,
+        "phone": chosen.phone,
+        "region": chosen.region,
+        "city": chosen.city,
+        "line1": chosen.line1,
+        "line2": chosen.line2,
+    }

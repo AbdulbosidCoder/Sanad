@@ -52,6 +52,7 @@ ignore = [
 "tests/**" = ["S101", "S105", "S106"]  # asserts and fake test passwords
 "app/modules/**/tests/**" = ["S101", "S105", "S106"]
 "conftest.py" = ["S608"]  # CREATE DATABASE needs an identifier, not a bind parameter
+"migrations/**" = ["E501"]  # generated CHECK constraint strings
 
 [tool.mypy]
 python_version = "3.12"
@@ -66,6 +67,7 @@ ignore_missing_imports = true
 module = ["app.modules.*.tests.*"]  # pytest fixtures are injected untyped, like tests/
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
+disallow_untyped_calls = false
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

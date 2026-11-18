@@ -297,3 +297,21 @@ async def store_variants(
     if variant_id is not None:
         stmt = stmt.where(ProductVariant.id == variant_id)
     return [(v, p) for v, p in (await db.execute(stmt)).all()]
+
+
+async def variants_with_products(
+    db: AsyncSession, variant_ids: Sequence[uuid.UUID]
+) -> Sequence[tuple[ProductVariant, Product, str | None]]:
+    rows = await db.execute(
+        select(ProductVariant, Product, cover_url())
+        .join(Product, Product.id == ProductVariant.product_id)
+        .where(ProductVariant.id.in_(variant_ids))
+    )
+    return [(v, p, c) for v, p, c in rows.all()]
+
+
+async def variant_id_by_sku(db: AsyncSession, sku: str) -> uuid.UUID | None:
+    found: uuid.UUID | None = await db.scalar(
+        select(ProductVariant.id).where(ProductVariant.sku == sku)
+    )
+    return found

@@ -11,6 +11,8 @@ reading this module's tables.
 
 import logging
 import uuid
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,7 +21,7 @@ from app.core.models import uuid7
 from app.modules.catalog import service as catalog
 from app.modules.catalog.service import VariantBrief
 from app.modules.inventory import repository as repo
-from app.modules.inventory.models import Inventory, StockMovement
+from app.modules.inventory.models import Inventory, StockMovement, StockReservation
 from app.modules.inventory.schemas import MovementOut, StockOut, StockUpdate
 from app.modules.stores.service import StoreAccess
 
@@ -143,3 +145,105 @@ async def list_movements(
 ) -> list[MovementOut]:
     await _variant(db, access.store_id, variant_id)
     return [MovementOut.model_validate(m) for m in await repo.movements(db, variant_id, limit)]
+
+
+# ---------------------------------------------------------------- reservations (for orders)
+
+
+@dataclass(frozen=True)
+class ReserveLine:
+    variant_id: uuid.UUID
+    store_id: uuid.UUID
+    quantity: int
+
+
+async def available(db: AsyncSession, variant_ids: list[uuid.UUID]) -> dict[uuid.UUID, int]:
+    """Free stock (``on_hand - reserved``) per variant; missing rows count as 0."""
+    rows = await repo.stock_by_variants(db, variant_ids)
+    return {
+        vid: (rows[vid].on_hand - rows[vid].reserved) if vid in rows else 0 for vid in variant_ids
+    }
+
+
+async def reserve(
+    db: AsyncSession, order_id: uuid.UUID, lines: list[ReserveLine], ttl_minutes: int
+) -> None:
+    """Holds stock for an unpaid order, all lines or none (the caller rolls back on error).
+    Raises ``INVENTORY.OUT_OF_STOCK`` naming the variants that ran out."""
+    short: list[str] = []
+    expires_at = datetime.now(UTC) + timedelta(minutes=ttl_minutes)
+    for line in sorted(lines, key=lambda x: x.variant_id):  # fixed order: no deadlocks
+        stock = await repo.try_reserve(db, line.variant_id, line.quantity)
+        if stock is None:
+            short.append(str(line.variant_id))
+            continue
+        db.add(
+            StockReservation(
+                id=uuid7(),
+                variant_id=line.variant_id,
+                store_id=line.store_id,
+                order_id=order_id,
+                quantity=line.quantity,
+                expires_at=expires_at,
+            )
+        )
+        await catalog.set_variant_in_stock(db, line.variant_id, stock.on_hand - stock.reserved > 0)
+    if short:
+        raise _error("OUT_OF_STOCK", f"Not enough stock for variants: {', '.join(short)}", 409)
+
+
+async def commit_reservations(db: AsyncSession, order_id: uuid.UUID) -> None:
+    """Payment succeeded: the held stock leaves the shelf (movement ``sale``)."""
+    for r in await repo.reservations_of(db, order_id):
+        stock = await repo.lock_stock(db, r.variant_id)
+        if stock is None:  # variant deleted meanwhile
+            r.status = "committed"
+            continue
+        stock.reserved -= r.quantity
+        stock.on_hand -= r.quantity
+        stock.version += 1
+        r.status = "committed"
+        db.add(
+            StockMovement(
+                id=uuid7(),
+                variant_id=r.variant_id,
+                store_id=r.store_id,
+                delta=-r.quantity,
+                on_hand_after=stock.on_hand,
+                reason="sale",
+                note=f"order {order_id}",
+                actor_id=None,
+            )
+        )
+        await catalog.set_variant_in_stock(db, r.variant_id, stock.on_hand - stock.reserved > 0)
+
+
+async def release_reservations(db: AsyncSession, order_id: uuid.UUID) -> None:
+    """Order not paid or cancelled before payment: the held stock is free again."""
+    for r in await repo.reservations_of(db, order_id):
+        stock = await repo.lock_stock(db, r.variant_id)
+        r.status = "released"
+        if stock is None:
+            continue
+        stock.reserved = max(0, stock.reserved - r.quantity)
+        stock.version += 1
+        await catalog.set_variant_in_stock(db, r.variant_id, stock.on_hand - stock.reserved > 0)
+
+
+async def return_to_stock(
+    db: AsyncSession, store_id: uuid.UUID, variant_id: uuid.UUID, quantity: int, note: str
+) -> None:
+    """A paid item came back (cancelled after payment, or returned): movement ``return``."""
+    await set_stock(
+        db,
+        store_id,
+        variant_id,
+        StockUpdate(delta=quantity, note=note[:255]),
+        actor_id=None,
+        reason="return",
+    )
+
+
+async def expired_reservation_orders(db: AsyncSession, limit: int = 100) -> list[uuid.UUID]:
+    """Orders whose stock hold ran out (the orders module cancels them)."""
+    return await repo.expired_order_ids(db, datetime.now(UTC), limit)

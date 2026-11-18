@@ -8,7 +8,9 @@ obeys the same rules as data made through the API:
 - 10 categories (tree), 10 brands;
 - 10 products with 2-5 variants, 7 seller photos (one per side), buyer photos, stock
   (some variants low or sold out, to test low-stock);
-- delivery addresses for the buyers.
+- delivery addresses for the buyers;
+- 7 orders in every state: paid, confirmed, shipped, delivered, unpaid (stock held),
+  payment failed, cancelled and refunded, and one with a return request.
 
 Safe to run again: if the demo admin already exists, nothing is changed.
 Refuses to run outside dev/test, because every demo account shares a known password.
@@ -28,12 +30,17 @@ from app.core.auth import Principal
 from app.core.config import get_settings
 from app.core.db import get_sessionmaker
 from app.core.models import uuid7
+from app.modules import setup_all
+from app.modules.cart import service as cart
 from app.modules.catalog import service as catalog
 from app.modules.catalog.schemas import BrandIn, CategoryIn, ImageIn, Names, ProductIn, VariantIn
 from app.modules.identity import service as identity
 from app.modules.identity.schemas import AddressIn, RegisterIn
 from app.modules.inventory import service as inventory
 from app.modules.inventory.schemas import StockUpdate
+from app.modules.orders import service as orders
+from app.modules.orders.schemas import CheckoutIn, ReturnIn, StatusIn
+from app.modules.payments import service as payments
 from app.modules.stores import service as stores
 from app.modules.stores.schemas import ApplicationIn
 from app.modules.stores.service import StoreAccess
@@ -392,16 +399,105 @@ async def _seed(db: AsyncSession) -> None:
     print("addresses: 4")
 
 
+# buyer, [(sku, qty)], what happens after checkout
+ORDERS: list[tuple[str, list[tuple[str, int]], str]] = [
+    ("buyer1", [("NIK-001-42", 1), ("CON-007-42", 1)], "delivered+shipped"),
+    ("buyer2", [("ADI-004-41", 1)], "confirmed"),
+    ("buyer3", [("NEW-005-43", 2)], "paid"),
+    ("buyer4", [("THE-009-M", 1)], "unpaid"),
+    ("buyer1", [("VAN-008-42", 1)], "payment_failed"),
+    ("buyer2", [("PUM-010-L", 2)], "cancelled_after_payment"),
+    ("buyer3", [("NIK-002-43", 1)], "delivered+return"),
+]
+
+
+async def _uid(db: AsyncSession, login: str) -> uuid.UUID:
+    user_id = await identity.find_user_id(db, f"{login}@{DOMAIN}")
+    if user_id is None:
+        raise RuntimeError(f"demo user {login} is missing")
+    return user_id
+
+
+async def _store_of(db: AsyncSession, seller: uuid.UUID, store_id: uuid.UUID) -> StoreAccess:
+    return StoreAccess(
+        store_id, seller, "seller_owner", identity.store_role_permissions("seller_owner"), True
+    )
+
+
+async def _seed_orders(db: AsyncSession) -> None:
+    owners: dict[uuid.UUID, uuid.UUID] = {}
+    for login in ("seller1", "seller2", "seller3"):
+        seller = await _uid(db, login)
+        for mine in await stores.my_stores(db, _principal(seller)):
+            owners[mine.store.id] = seller
+
+    for n, (login, lines, outcome) in enumerate(ORDERS, start=1):
+        buyer = _principal(await _uid(db, login))
+        who = cart.owner(buyer.user_id, None)
+        for sku, quantity in lines:
+            variant_id = await catalog.find_variant_id(db, sku)
+            if variant_id is None:
+                raise RuntimeError(f"demo variant {sku} is missing")
+            await cart.add_item(db, who, variant_id, quantity)
+        placed = await orders.checkout(db, buyer, CheckoutIn(), f"demo-order-{n:02d}")
+        if outcome == "unpaid":
+            continue
+        result = "failed" if outcome == "payment_failed" else "succeeded"
+        await payments.confirm_fake(db, buyer, placed.payment.id, result)
+        if outcome == "cancelled_after_payment":
+            await orders.cancel_order(db, buyer, placed.order.id, "передумал")
+            continue
+        steps = {
+            "confirmed": [["confirmed"]],
+            "delivered+shipped": [["confirmed", "shipped", "delivered"], ["confirmed", "shipped"]],
+            "delivered+return": [["confirmed", "shipped", "delivered"]],
+        }.get(outcome, [])
+        for part, statuses in zip(placed.order.seller_orders, steps, strict=False):
+            access = await _store_of(db, owners[part.store_id], part.store_id)
+            for status in statuses:
+                await orders.seller_set_status(
+                    db,
+                    access,
+                    part.id,
+                    StatusIn(
+                        status=status, tracking_number=f"UZ{n:04d}" if status == "shipped" else None
+                    ),
+                )
+        if outcome == "delivered+return":
+            item = placed.order.seller_orders[0].items[0]
+            await orders.request_return(
+                db,
+                buyer,
+                placed.order.id,
+                item.id,
+                ReturnIn(quantity=1, reason="Не подошёл размер"),
+            )
+    print(f"orders: {len(ORDERS)} (paid, shipped, delivered, unpaid, failed, refunded, return)")
+
+
+async def _has_orders(db: AsyncSession) -> bool:
+    buyer = await identity.find_user_id(db, f"buyer1@{DOMAIN}")
+    return buyer is not None and bool(await orders.list_orders(db, _principal(buyer), 0, 1))
+
+
 async def run(if_empty: bool) -> int:
     settings = get_settings()
     if settings.app_env not in ("dev", "test"):
         print(f"refusing to seed demo data in APP_ENV={settings.app_env}", file=sys.stderr)
         return 1
+    setup_all()  # event handlers (payment -> order) are subscribed in module setup hooks
+    changed = False
     async with get_sessionmaker()() as db:
-        if await identity.find_user_id(db, MARKER) is not None:
-            print(f"demo data is already there ({MARKER} exists): nothing to do")
-            return 0
-        await _seed(db)
+        if await identity.find_user_id(db, MARKER) is None:
+            await _seed(db)
+            changed = True
+        # Sections added later are loaded into databases seeded by an older version.
+        if not await _has_orders(db):
+            await _seed_orders(db)
+            changed = True
+    if not changed:
+        print(f"demo data is already there ({MARKER} exists): nothing to do")
+        return 0
     print(f"\nDone. Sign in with any {DOMAIN} account, password: {PASSWORD}")
     print(f"  admin:   {MARKER}            (super_admin)")
     print(f"  seller:  seller1@{DOMAIN}          (store Sneaker Lab)")

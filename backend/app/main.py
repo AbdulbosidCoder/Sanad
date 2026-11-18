@@ -11,7 +11,7 @@ from app.core.config import get_settings
 from app.core.errors import register_error_handlers
 from app.core.logging import setup_logging
 from app.core.middleware import RequestContextMiddleware
-from app.modules import ALL_MODULES
+from app.modules import ALL_MODULES, setup_all
 from app.system import router as system_router
 
 API_PREFIX = "/api/v1"
@@ -54,9 +54,8 @@ def create_app() -> FastAPI:
     register_error_handlers(app)
 
     app.include_router(system_router)
+    setup_all()
     for module in ALL_MODULES:
-        if module.setup is not None:
-            module.setup()
         app.include_router(module.router, prefix=API_PREFIX)
     return app
 
