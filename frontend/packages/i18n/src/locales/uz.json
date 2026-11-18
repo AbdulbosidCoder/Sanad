@@ -33,5 +33,9 @@
   "error.copy": "Nusxa olish",
   "error.copied": "Nusxa olindi",
   "error.retry": "Qayta urinish",
-  "error.network": "Server bilan aloqa yo‘q"
+  "error.network": "Server bilan aloqa yo‘q",
+  "theme.toggle": "Mavzu",
+  "theme.system": "Tizimdagidek",
+  "theme.light": "Kunduzgi",
+  "theme.dark": "Tungi"
 }
