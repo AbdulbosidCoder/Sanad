@@ -13,6 +13,9 @@ dependencies = [
     "alembic>=1.14",
     "redis>=5.2",
     "celery>=5.4",
+    "argon2-cffi>=23.1",
+    "pyjwt[crypto]>=2.10",
+    "email-validator>=2.2",
 ]
 
 [project.optional-dependencies]
@@ -43,8 +46,9 @@ select = ["E", "F", "W", "I", "B", "UP", "S", "ASYNC", "SIM", "RUF"]
 ignore = ["B008"]  # FastAPI dependencies are declared as default arguments
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]
-"app/modules/**/tests/**" = ["S101"]
+"tests/**" = ["S101", "S105", "S106"]  # asserts and fake test passwords
+"app/modules/**/tests/**" = ["S101", "S105", "S106"]
+"conftest.py" = ["S608"]  # CREATE DATABASE needs an identifier, not a bind parameter
 
 [tool.mypy]
 python_version = "3.12"
@@ -54,6 +58,11 @@ plugins = ["pydantic.mypy"]
 [[tool.mypy.overrides]]
 module = ["celery.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["app.modules.*.tests.*"]  # pytest fixtures are injected untyped, like tests/
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

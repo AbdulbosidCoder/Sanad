@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,9 +22,30 @@ class Settings(BaseSettings):
     # Payments: the fake provider must never be enabled in production.
     fake_payments_enabled: bool = True
 
+    # --- Auth (ADR 0005) ---
+    # Ed25519 private key seed, base64url, 32 bytes. Generate one with:
+    #   python -c "import secrets,base64;print(base64.urlsafe_b64encode(
+    #       secrets.token_bytes(32)).decode())"
+    # Empty in dev/test -> a throwaway key per process (access tokens die on restart).
+    jwt_signing_key: str = ""
+    jwt_key_id: str = "k1"
+    jwt_issuer: str = "sanad"
+    access_token_ttl_seconds: int = 15 * 60
+    session_ttl_days: int = 30
+    # Browsers accept Secure cookies on http://localhost, so this stays on in dev too.
+    auth_cookie_secure: bool = True
+    login_max_failures: int = 5
+    login_lock_minutes: int = 15
+
     @property
     def is_prod(self) -> bool:
         return self.app_env == "prod"
+
+    @model_validator(mode="after")
+    def _prod_requires_secrets(self) -> "Settings":
+        if self.app_env in ("staging", "prod") and not self.jwt_signing_key:
+            raise ValueError("JWT_SIGNING_KEY must be set outside dev/test")
+        return self
 
 
 @lru_cache

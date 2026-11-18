@@ -4,6 +4,7 @@ The registry powers ``GET /api/v1/system/modules`` (a live map of the system)
 and lets ``main.py`` mount all routers without knowing module internals.
 """
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 from fastapi import APIRouter
@@ -18,6 +19,11 @@ class ModuleInfo:
     emits: tuple[str, ...] = ()
     listens_to: tuple[str, ...] = ()
     tables: tuple[str, ...] = field(default=())
+    # Called once while the app is built (plug hooks into core, no I/O).
+    setup: Callable[[], None] | None = None
+    # Called on application startup (may use the database). A failure is logged
+    # and does not stop the API, so health checks can still report the problem.
+    on_startup: Callable[[], Awaitable[None]] | None = None
 
 
 def module_router(name: str) -> APIRouter:

@@ -1,5 +1,9 @@
 """Application entry point: builds the FastAPI app from core pieces and modules."""
 
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -12,6 +16,20 @@ from app.system import router as system_router
 
 API_PREFIX = "/api/v1"
 
+logger = logging.getLogger("app.main")
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    for module in ALL_MODULES:
+        if module.on_startup is None:
+            continue
+        try:
+            await module.on_startup()
+        except Exception:
+            logger.exception("startup hook of module %s failed", module.name)
+    yield
+
 
 def create_app() -> FastAPI:
     settings = get_settings()
@@ -22,6 +40,7 @@ def create_app() -> FastAPI:
         version="0.1.0",
         docs_url=None if settings.is_prod else f"{API_PREFIX}/docs",
         openapi_url=None if settings.is_prod else f"{API_PREFIX}/openapi.json",
+        lifespan=lifespan,
     )
     app.add_middleware(
         CORSMiddleware,
@@ -36,6 +55,8 @@ def create_app() -> FastAPI:
 
     app.include_router(system_router)
     for module in ALL_MODULES:
+        if module.setup is not None:
+            module.setup()
         app.include_router(module.router, prefix=API_PREFIX)
     return app
 
